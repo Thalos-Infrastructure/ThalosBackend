@@ -6,6 +6,7 @@ import { InternalTrustlessModule } from "./internal-trustless/internal-trustless
 import { AgreementsModule } from "./agreements/agreements.module";
 import { UsersModule } from "./users/users.module";
 import { ContactsModule } from "./contacts/contacts.module";
+import { NotificationsModule } from "./notifications/notifications.module";
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { ContactsModule } from "./contacts/contacts.module";
     AgreementsModule,
     UsersModule,
     ContactsModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}
