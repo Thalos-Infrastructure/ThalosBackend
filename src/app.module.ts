@@ -10,6 +10,7 @@ import { NotificationsModule } from "./notifications/notifications.module";
 import { AgreementChatModule } from "./agreement-chat/agreement-chat.module";
 import { DisputesModule } from "./disputes/disputes.module";
 import { ProfilesModule } from "./profiles/profiles.module";
+import { WalletsModule } from "./wallets/wallets.module";
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { ProfilesModule } from "./profiles/profiles.module";
     AgreementChatModule,
     DisputesModule,
     ProfilesModule,
+    WalletsModule,
   ],
 })
 export class AppModule {}
