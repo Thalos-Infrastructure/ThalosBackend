@@ -7,6 +7,10 @@ import { AgreementsModule } from "./agreements/agreements.module";
 import { UsersModule } from "./users/users.module";
 import { ContactsModule } from "./contacts/contacts.module";
 import { NotificationsModule } from "./notifications/notifications.module";
+import { AgreementChatModule } from "./agreement-chat/agreement-chat.module";
+import { DisputesModule } from "./disputes/disputes.module";
+import { BountiesModule } from "./bounties/bounties.module";
+import { ProfilesModule } from "./profiles/profiles.module";
 
 @Module({
   imports: [
@@ -18,6 +22,10 @@ import { NotificationsModule } from "./notifications/notifications.module";
     UsersModule,
     ContactsModule,
     NotificationsModule,
+    AgreementChatModule,
+    DisputesModule,
+    BountiesModule,
+    ProfilesModule,
   ],
 })
 export class AppModule {}
