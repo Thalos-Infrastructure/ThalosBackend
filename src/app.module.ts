@@ -9,7 +9,6 @@ import { ContactsModule } from "./contacts/contacts.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { AgreementChatModule } from "./agreement-chat/agreement-chat.module";
 import { DisputesModule } from "./disputes/disputes.module";
-import { BountiesModule } from "./bounties/bounties.module";
 import { ProfilesModule } from "./profiles/profiles.module";
 
 @Module({
@@ -24,7 +23,6 @@ import { ProfilesModule } from "./profiles/profiles.module";
     NotificationsModule,
     AgreementChatModule,
     DisputesModule,
-    BountiesModule,
     ProfilesModule,
   ],
 })
