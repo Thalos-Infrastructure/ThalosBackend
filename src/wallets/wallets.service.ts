@@ -374,15 +374,23 @@ export class WalletsService {
 
         const agreements = participations
           .filter((p) => p.agreement)
-          .map((p) => ({
-            id: (p.agreement as Record<string, unknown>).id as string,
-            title: (p.agreement as Record<string, unknown>).title as string,
-            status: (p.agreement as Record<string, unknown>).status as string,
-            amount: (p.agreement as Record<string, unknown>).amount as string,
-            role: p.role,
-            created_at: (p.agreement as Record<string, unknown>)
-              .created_at as string,
-          }));
+          .map((p) => {
+            const agreement = p.agreement as unknown as {
+              id: string;
+              title: string;
+              status: string;
+              amount: string;
+              created_at: string;
+            };
+            return {
+              id: agreement.id,
+              title: agreement.title,
+              status: agreement.status,
+              amount: agreement.amount,
+              role: p.role,
+              created_at: agreement.created_at,
+            };
+          });
 
         return {
           wallet_address: wallet.wallet_address,

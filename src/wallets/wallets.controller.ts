@@ -9,7 +9,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import { CurrentUser, JwtPayload } from "../auth/current-user.decorator";
+import { CurrentUser, AuthUserCtx } from "../auth/current-user.decorator";
 import { WalletsService } from "./wallets.service";
 import { LinkWalletDto, UpdateWalletDto } from "./dto/wallets.dto";
 
@@ -23,8 +23,8 @@ export class WalletsController {
    * Get all wallets for the authenticated user
    */
   @Get()
-  async getMyWallets(@CurrentUser() user: JwtPayload) {
-    return this.walletsService.getUserWallets(user.sub);
+  async getMyWallets(@CurrentUser() user: AuthUserCtx) {
+    return this.walletsService.getUserWallets(user.userId);
   }
 
   /**
@@ -32,8 +32,8 @@ export class WalletsController {
    * Get all wallets with their current balances
    */
   @Get("with-balances")
-  async getMyWalletsWithBalances(@CurrentUser() user: JwtPayload) {
-    return this.walletsService.getUserWalletsWithBalances(user.sub);
+  async getMyWalletsWithBalances(@CurrentUser() user: AuthUserCtx) {
+    return this.walletsService.getUserWalletsWithBalances(user.userId);
   }
 
   /**
@@ -41,8 +41,8 @@ export class WalletsController {
    * Get all agreements grouped by wallet
    */
   @Get("agreements")
-  async getAgreementsByWallet(@CurrentUser() user: JwtPayload) {
-    return this.walletsService.getAgreementsByWallet(user.sub);
+  async getAgreementsByWallet(@CurrentUser() user: AuthUserCtx) {
+    return this.walletsService.getAgreementsByWallet(user.userId);
   }
 
   /**
@@ -50,8 +50,8 @@ export class WalletsController {
    * Get the primary wallet for the user
    */
   @Get("primary")
-  async getPrimaryWallet(@CurrentUser() user: JwtPayload) {
-    const wallet = await this.walletsService.getPrimaryWallet(user.sub);
+  async getPrimaryWallet(@CurrentUser() user: AuthUserCtx) {
+    const wallet = await this.walletsService.getPrimaryWallet(user.userId);
     return { wallet };
   }
 
@@ -71,10 +71,10 @@ export class WalletsController {
    */
   @Post()
   async linkWallet(
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser() user: AuthUserCtx,
     @Body() dto: LinkWalletDto,
   ) {
-    return this.walletsService.linkWallet(user.sub, dto);
+    return this.walletsService.linkWallet(user.userId, dto);
   }
 
   /**
@@ -83,11 +83,11 @@ export class WalletsController {
    */
   @Patch(":id")
   async updateWallet(
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser() user: AuthUserCtx,
     @Param("id") walletId: string,
     @Body() dto: UpdateWalletDto,
   ) {
-    return this.walletsService.updateWallet(user.sub, walletId, dto);
+    return this.walletsService.updateWallet(user.userId, walletId, dto);
   }
 
   /**
@@ -96,10 +96,10 @@ export class WalletsController {
    */
   @Delete(":id")
   async unlinkWallet(
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser() user: AuthUserCtx,
     @Param("id") walletId: string,
   ) {
-    return this.walletsService.unlinkWallet(user.sub, walletId);
+    return this.walletsService.unlinkWallet(user.userId, walletId);
   }
 
   /**
@@ -108,11 +108,11 @@ export class WalletsController {
    */
   @Get("check/:address")
   async checkWalletOwnership(
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser() user: AuthUserCtx,
     @Param("address") address: string,
   ) {
     const belongs = await this.walletsService.walletBelongsToUser(
-      user.sub,
+      user.userId,
       address,
     );
     return { belongs };
