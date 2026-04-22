@@ -7,5 +7,6 @@ import { AgreementsService } from "./agreements.service";
   imports: [AuthModule],
   controllers: [AgreementsController],
   providers: [AgreementsService],
+  exports: [AgreementsService],
 })
 export class AgreementsModule {}
