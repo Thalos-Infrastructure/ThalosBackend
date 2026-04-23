@@ -6,6 +6,7 @@ import { InternalTrustlessModule } from "./internal-trustless/internal-trustless
 import { AgreementsModule } from "./agreements/agreements.module";
 import { UsersModule } from "./users/users.module";
 import { ContactsModule } from "./contacts/contacts.module";
+import { RootController } from "./root.controller";
 
 @Module({
   imports: [
@@ -17,5 +18,6 @@ import { ContactsModule } from "./contacts/contacts.module";
     UsersModule,
     ContactsModule,
   ],
+  controllers: [RootController],
 })
 export class AppModule {}

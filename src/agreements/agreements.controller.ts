@@ -1,13 +1,16 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
   Query,
   UseGuards,
 } from "@nestjs/common";
+import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser, type AuthUserCtx } from "../auth/current-user.decorator";
 import { AgreementsService } from "./agreements.service";
@@ -16,14 +19,21 @@ import { LinkContractDto } from "./dto/link-contract.dto";
 import { UpdateAgreementStatusDto } from "./dto/update-status.dto";
 import { UpdateMilestoneDto } from "./dto/update-milestone.dto";
 
+@ApiTags("agreements")
+@ApiBearerAuth("bearer")
 @Controller("agreements")
 @UseGuards(JwtAuthGuard)
 export class AgreementsController {
   constructor(private readonly agreements: AgreementsService) {}
 
   @Post()
-  create(@CurrentUser() user: AuthUserCtx, @Body() dto: CreateAgreementDto) {
-    return this.agreements.create(user.userId, dto);
+  @HttpCode(201)
+  async create(@CurrentUser() user: AuthUserCtx, @Body() dto: CreateAgreementDto) {
+    const result = await this.agreements.create(user.userId, dto);
+    if (result.error) {
+      throw new BadRequestException(result.error);
+    }
+    return result;
   }
 
   @Get("by-wallet")

@@ -6,7 +6,7 @@ API para acuerdos en Supabase, contactos, búsqueda de perfiles y relay interno 
 
 - Node.js 20+
 - pnpm o npm
-- Proyecto Supabase con las tablas usadas por el frontend (`agreements`, `agreement_participants`, `agreement_activity`, `profiles`, `contacts`, `auth_users`, …)
+- Proyecto Supabase con las tablas usadas por el frontend (`agreements`, `agreement_participants`, `agreement_activity`, `profiles`, `contacts`, `auth_users`, …). Migraciones recomendadas: `009_agreements_contract_id.sql`, `010_agreements_nest_columns.sql` (columnas y checks que espera Nest).
 
 ## Variables de entorno
 
@@ -23,6 +23,10 @@ pnpm run start:dev
 ```
 
 Por defecto escucha en el puerto **3001**.
+
+- **Documentación interactiva (Swagger UI):** `http://localhost:3001/v1/docs`
+- **OpenAPI JSON:** `http://localhost:3001/v1/docs-json`
+- **Raíz del API (punteros):** `GET http://localhost:3001/v1`
 
 ## Rutas principales
 

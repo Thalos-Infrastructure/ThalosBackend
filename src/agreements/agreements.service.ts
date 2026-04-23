@@ -26,8 +26,15 @@ export class AgreementsService {
 
   private async assertActorWallet(userId: string, actorWallet: string) {
     const w = await this.walletForUserId(userId);
-    if (!w || w !== actorWallet) {
-      throw new ForbiddenException("actor_wallet does not match authenticated user");
+    if (!w) {
+      throw new ForbiddenException(
+        "No hay wallet en auth_users para este usuario (wallet_public_key vacío o usuario no encontrado). Revisá Supabase y que Nest use el mismo proyecto (SUPABASE_URL).",
+      );
+    }
+    if (w !== actorWallet) {
+      throw new ForbiddenException(
+        "created_by debe ser exactamente auth_users.wallet_public_key del usuario del JWT (misma cadena G...).",
+      );
     }
   }
 
@@ -263,11 +270,30 @@ export class AgreementsService {
     if (partError) {
       return { agreements: [], error: partError.message };
     }
-    if (!participations?.length) {
+
+    const { data: createdRows, error: createdError } = await this.supabase
+      .getClient()
+      .from("agreements")
+      .select("id")
+      .eq("created_by", wallet);
+
+    if (createdError) {
+      return { agreements: [], error: createdError.message };
+    }
+
+    const idSet = new Set<string>();
+    participations?.forEach((p) => {
+      if (p.agreement_id) idSet.add(p.agreement_id as string);
+    });
+    createdRows?.forEach((r) => {
+      if (r.id) idSet.add(r.id as string);
+    });
+
+    if (idSet.size === 0) {
       return { agreements: [], error: null };
     }
 
-    const ids = participations.map((p) => p.agreement_id);
+    const ids = [...idSet];
     const { data: agreements, error: agError } = await this.supabase
       .getClient()
       .from("agreements")
@@ -314,10 +340,22 @@ export class AgreementsService {
       .maybeSingle();
 
     if (error) {
-      if (error.code === "PGRST116") return { agreement: null, error: null };
+      if (error.code === "PGRST116") {
+        return {
+          agreement: null,
+          error:
+            "Ningún acuerdo tiene contract_id igual a este valor (revisá Supabase o hacé PATCH link-contract antes).",
+        };
+      }
       return { agreement: null, error: error.message };
     }
-    if (!data) return { agreement: null, error: null };
+    if (!data) {
+      return {
+        agreement: null,
+        error:
+          "Ningún acuerdo tiene contract_id igual a este valor (copiá el texto exacto de la columna contract_id).",
+      };
+    }
 
     await this.assertCanAccessAgreement(userId, data.id);
     return { agreement: data, error: null };

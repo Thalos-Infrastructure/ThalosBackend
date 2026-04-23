@@ -1,9 +1,12 @@
 import { Controller, Get, Query, UseGuards } from "@nestjs/common";
+import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser, type AuthUserCtx } from "../auth/current-user.decorator";
 import { UsersService } from "./users.service";
 import { SearchUsersDto } from "./dto/search-users.dto";
 
+@ApiTags("users")
+@ApiBearerAuth("bearer")
 @Controller("users")
 @UseGuards(JwtAuthGuard)
 export class UsersController {

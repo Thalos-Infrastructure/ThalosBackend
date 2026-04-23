@@ -1,9 +1,12 @@
 import { Body, Controller, Delete, Get, Param, Post, UseGuards } from "@nestjs/common";
+import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser, type AuthUserCtx } from "../auth/current-user.decorator";
 import { ContactsService } from "./contacts.service";
 import { AddContactDto } from "./dto/add-contact.dto";
 
+@ApiTags("contacts")
+@ApiBearerAuth("bearer")
 @Controller("contacts")
 @UseGuards(JwtAuthGuard)
 export class ContactsController {
