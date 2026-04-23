@@ -7,6 +7,11 @@ import { AgreementsModule } from "./agreements/agreements.module";
 import { UsersModule } from "./users/users.module";
 import { ContactsModule } from "./contacts/contacts.module";
 import { RootController } from "./root.controller";
+import { NotificationsModule } from "./notifications/notifications.module";
+import { AgreementChatModule } from "./agreement-chat/agreement-chat.module";
+import { DisputesModule } from "./disputes/disputes.module";
+import { ProfilesModule } from "./profiles/profiles.module";
+import { WalletsModule } from "./wallets/wallets.module";
 
 @Module({
   imports: [
@@ -17,6 +22,11 @@ import { RootController } from "./root.controller";
     AgreementsModule,
     UsersModule,
     ContactsModule,
+    NotificationsModule,
+    AgreementChatModule,
+    DisputesModule,
+    ProfilesModule,
+    WalletsModule,
   ],
   controllers: [RootController],
 })
