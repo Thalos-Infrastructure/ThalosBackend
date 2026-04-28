@@ -62,4 +62,38 @@ export class InternalTrustlessService {
     }
     return { status: res.status, data };
   }
+
+  /**
+   * Get all escrows where the address is a signer (sender, receiver, or approver)
+   */
+  async getEscrowsBySigner(address: string): Promise<unknown> {
+    const result = await this.relay("GET", "helper/get-escrows-by-signer", {
+      address,
+    });
+    if (result.status >= 400) {
+      throw new BadRequestException(result.data);
+    }
+    return result.data;
+  }
+
+  /**
+   * Get escrows filtered by role, status, and type
+   */
+  async getEscrowsByRole(params: {
+    address: string;
+    role?: "sender" | "receiver" | "approver";
+    status?: string;
+    type?: "single-release" | "multi-release";
+  }): Promise<unknown> {
+    const query: Record<string, string> = { address: params.address };
+    if (params.role) query.role = params.role;
+    if (params.status) query.status = params.status;
+    if (params.type) query.type = params.type;
+
+    const result = await this.relay("GET", "helper/get-escrows-by-role", query);
+    if (result.status >= 400) {
+      throw new BadRequestException(result.data);
+    }
+    return result.data;
+  }
 }
