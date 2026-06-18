@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
+import { CommonModule } from "./common/common.module";
 import { AuthModule } from "./auth/auth.module";
 import { SupabaseModule } from "./supabase/supabase.module";
 import { InternalTrustlessModule } from "./internal-trustless/internal-trustless.module";
@@ -16,6 +17,7 @@ import { WalletsModule } from "./wallets/wallets.module";
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    CommonModule,
     SupabaseModule,
     AuthModule,
     InternalTrustlessModule,
