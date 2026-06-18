@@ -1,12 +1,13 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
+import { CommonModule } from "../common/common.module";
 import { InternalTrustlessController } from "./internal-trustless.controller";
 import { InternalTrustlessService } from "./internal-trustless.service";
 import { TrustlessPublicController } from "./trustless-public.controller";
 import { EscrowsController } from "./escrows.controller";
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, CommonModule],
   controllers: [
     InternalTrustlessController,
     TrustlessPublicController,

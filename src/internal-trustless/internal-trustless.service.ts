@@ -1,9 +1,11 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
+import { ApiClient } from "../common/api/api-client";
 
 const ALLOWED_PREFIXES = ["deployer/", "escrow/", "helper/"];
 
 @Injectable()
 export class InternalTrustlessService {
+  constructor(private readonly apiClient: ApiClient) {}
   private getBaseUrl(): string {
     const u = process.env.TRUSTLESSWORK_API_URL;
     if (!u) throw new BadRequestException("TRUSTLESSWORK_API_URL not set");
@@ -33,34 +35,27 @@ export class InternalTrustlessService {
     this.assertAllowedPath(path);
     const base = this.getBaseUrl();
     const normalizedPath = path.replace(/^\/+/, "");
-    const url = new URL(`${base}/${normalizedPath}`);
-    if (query && method === "GET") {
-      Object.entries(query).forEach(([k, v]) => {
-        if (v !== undefined && v !== null && v !== "") {
-          url.searchParams.set(k, String(v));
-        }
-      });
-    }
+    const url = `${base}/${normalizedPath}`;
 
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
       "x-api-key": this.getApiKey(),
     };
 
-    const res = await fetch(url.toString(), {
+    const response = await this.apiClient.request({
       method,
+      url,
       headers,
-      body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
+      body,
+      query,
     });
 
-    const text = await res.text();
-    let data: unknown;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = text;
-    }
-    return { status: res.status, data };
+    // Extract status code from the raw fetch if needed, otherwise return a standard mapping
+    const status = response.success ? 200 : 400;
+
+    return {
+      status,
+      data: response.data || response.error,
+    };
   }
 
   /**

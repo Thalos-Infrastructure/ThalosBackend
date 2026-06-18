@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { SupabaseService } from "../supabase/supabase.service";
+import { ApiClient } from "../common/api/api-client";
 import { LinkWalletDto, UpdateWalletDto, WalletType } from "./dto/wallets.dto";
 
 export interface UserWallet {
@@ -53,6 +54,7 @@ export class WalletsService {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly config: ConfigService,
+    private readonly apiClient: ApiClient,
   ) {
     const network = this.config.get<string>("STELLAR_NETWORK") || "testnet";
     this.horizonUrl =
@@ -120,36 +122,40 @@ export class WalletsService {
   async getWalletBalance(
     walletAddress: string,
   ): Promise<{ xlm: string; usdc: string }> {
-    try {
-      const response = await fetch(
-        `${this.horizonUrl}/accounts/${walletAddress}`,
-      );
+    const response = await this.apiClient.get<{
+      balances: Array<{
+        asset_type: string;
+        asset_code?: string;
+        asset_issuer?: string;
+        balance: string;
+      }>;
+    }>(`${this.horizonUrl}/accounts/${walletAddress}`);
 
-      if (!response.ok) {
-        // Account might not exist or not be funded
-        return { xlm: "0", usdc: "0" };
-      }
-
-      const account = await response.json();
-      let xlmBalance = "0";
-      let usdcBalance = "0";
-
-      for (const balance of account.balances) {
-        if (balance.asset_type === "native") {
-          xlmBalance = balance.balance;
-        } else if (
-          balance.asset_code === this.usdcAssetCode &&
-          balance.asset_issuer === this.usdcIssuer
-        ) {
-          usdcBalance = balance.balance;
-        }
-      }
-
-      return { xlm: xlmBalance, usdc: usdcBalance };
-    } catch (e) {
-      console.error("Error fetching wallet balance:", e);
+    if (!response.success) {
+      // Account might not exist or not be funded
       return { xlm: "0", usdc: "0" };
     }
+
+    const account = response.data;
+    if (!account) {
+      return { xlm: "0", usdc: "0" };
+    }
+
+    let xlmBalance = "0";
+    let usdcBalance = "0";
+
+    for (const balance of account.balances) {
+      if (balance.asset_type === "native") {
+        xlmBalance = balance.balance;
+      } else if (
+        balance.asset_code === this.usdcAssetCode &&
+        balance.asset_issuer === this.usdcIssuer
+      ) {
+        usdcBalance = balance.balance;
+      }
+    }
+
+    return { xlm: xlmBalance, usdc: usdcBalance };
   }
 
   /**
