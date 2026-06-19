@@ -15,6 +15,20 @@ function assertAllowedPath(path: string): void {
   }
 }
 
+/**
+ * Headers para Trustless Work. La API key vive SOLO en el servidor
+ * (`TRUSTLESSWORK_API_KEY`); se envía como `x-api-key` cuando está configurada.
+ * TW la requiere para interacción programática (lecturas y escrituras).
+ */
+function buildHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const apiKey = process.env.TRUSTLESSWORK_API_KEY;
+  if (apiKey) headers["x-api-key"] = apiKey;
+  return headers;
+}
+
 export async function relayToTrustless(
   method: "GET" | "POST",
   path: string,
@@ -34,7 +48,7 @@ export async function relayToTrustless(
 
   const res = await fetch(url.toString(), {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: buildHeaders(),
     body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
   });
 

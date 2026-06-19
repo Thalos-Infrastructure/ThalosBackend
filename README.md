@@ -14,6 +14,8 @@ Copiá `.env.example` a `.env` y completá valores. `JWT_SECRET` debe coincidir 
 
 - `SUPABASE_URL`: misma URL pública del proyecto (sin depender de `NEXT_PUBLIC` en Nest).
 - `THALOS_INTERNAL_SECRET`: compartido con Next en `THALOS_INTERNAL_SECRET` para `/api/trustless/relay`.
+- `TRUSTLESSWORK_API_URL` / `TRUSTLESSWORK_API_KEY`: API de Trustless Work; la clave vive **solo** acá.
+- `PLATFORM_ADDRESS`, `DISPUTE_RESOLVER`, `TRUSTLINE_USDC_ADDRESS` (opcionales): config de plataforma para crear escrows; tienen defaults de testnet.
 
 ## Arranque
 
@@ -34,6 +36,9 @@ Por defecto escucha en el puerto **3001**.
 |--------|------|-------------|
 | `POST /v1/internal/trustless/relay` | Header `x-thalos-internal-secret` | Proxy hacia Trustless Work (solo servidor Next) |
 | `POST /v1/trustless/prepare` | Bearer JWT app | Mismo relay que arriba; respuesta incluye `unsignedTransaction` cuando TW la envía |
+| `GET /v1/escrows/by-signer/:address` · `GET /v1/escrows/by-role` | Bearer JWT app | Lectura de escrows (relay a TW) |
+| `POST /v1/escrows/{create,fund,approve-milestone,change-milestone-status,release,dispute}` | Bearer JWT app | Escrituras de escrow; devuelven `unsignedTransaction` para firmar en el cliente. Validan que el firmante == wallet del JWT |
+| `POST /v1/escrows/send-transaction` | Bearer JWT app | Envía a la red el XDR ya firmado |
 | `GET|POST|PATCH /v1/agreements/*` | Bearer JWT app | CRUD acuerdos en Supabase |
 | `GET /v1/users/search` | Bearer JWT | Búsqueda de perfiles |
 | `GET|POST|DELETE /v1/contacts` | Bearer JWT | Contactos |
