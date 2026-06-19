@@ -6,13 +6,24 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from "@nestjs/common";
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from "@nestjs/swagger";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { CurrentUser, AuthUserCtx } from "../auth/current-user.decorator";
 import { WalletsService } from "./wallets.service";
 import { LinkWalletDto, UpdateWalletDto } from "./dto/wallets.dto";
+import { VerificationChallengeQueryDto } from "./dto/verification-challenge.dto";
 
+@ApiTags("wallets")
+@ApiBearerAuth("bearer")
 @Controller("wallets")
 @UseGuards(JwtAuthGuard)
 export class WalletsController {
@@ -53,6 +64,33 @@ export class WalletsController {
   async getPrimaryWallet(@CurrentUser() user: AuthUserCtx) {
     const wallet = await this.walletsService.getPrimaryWallet(user.userId);
     return { wallet };
+  }
+
+  /**
+   * GET /wallets/verification-challenge?address=G...
+   * Generate a stateless wallet ownership verification challenge
+   */
+  @ApiOperation({
+    summary: "Generate a stateless wallet ownership verification challenge",
+  })
+  @ApiQuery({
+    name: "address",
+    required: true,
+    description: "Stellar public key (G..., 56 chars)",
+    example: "GA7QYNF7SOWQ3GLR2BGMZEHHHVSH3VK4UFR2QPYDQGPHK3WSALDQXJZN",
+  })
+  @ApiResponse({ status: 200, description: "Challenge generated" })
+  @ApiResponse({ status: 400, description: "Invalid Stellar address" })
+  @ApiResponse({ status: 401, description: "Unauthorized" })
+  @Get("verification-challenge")
+  getVerificationChallenge(
+    @CurrentUser() user: AuthUserCtx,
+    @Query() query: VerificationChallengeQueryDto,
+  ) {
+    return this.walletsService.generateVerificationChallenge(
+      user.userId,
+      query.address,
+    );
   }
 
   /**
