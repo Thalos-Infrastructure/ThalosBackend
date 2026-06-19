@@ -138,6 +138,51 @@ if (-not [string]::IsNullOrWhiteSpace($InternalSecret)) {
   Write-Host "OK internal relay -> upstreamStatus=$($relay.Json.status)" -ForegroundColor Green
 }
 
+Write-Step "6) POST /v1/disputes (abrir disputa)"
+$disputeBody = @{
+  agreement_id = $agreementId
+  opened_by = $CreatedByWallet
+  reason = "Smoke test dispute - incumplimiento de milestones"
+  evidence_urls = @("https://example.com/evidence1.pdf")
+}
+$openDispute = Invoke-JsonRequest -Method "POST" -Url "$base/v1/disputes" -Headers $authHeaders -Body $disputeBody
+if ($openDispute.Status -lt 200 -or $openDispute.Status -ge 300) {
+  Fail "No se pudo abrir disputa. HTTP $($openDispute.Status). Raw: $($openDispute.Raw)"
+}
+$disputeId = $openDispute.Json.dispute.id
+if ([string]::IsNullOrWhiteSpace($disputeId)) {
+  Fail "La respuesta de openDispute no trajo dispute.id. Raw: $($openDispute.Raw)"
+}
+Write-Host "OK dispute opened -> dispute.id=$disputeId" -ForegroundColor Green
+
+Write-Step "7) GET /v1/disputes/open"
+$openList = Invoke-JsonRequest -Method "GET" -Url "$base/v1/disputes/open" -Headers $authHeaders
+if ($openList.Status -lt 200 -or $openList.Status -ge 300) {
+  Fail "Fallo get open disputes. HTTP $($openList.Status)."
+}
+Write-Host "OK open disputes list count=$(@($openList.Json.disputes).Count)" -ForegroundColor Green
+
+Write-Step "8) PATCH /v1/disputes/{id}/resolve"
+$resolveBody = @{
+  resolved_by = $CreatedByWallet
+  payer_percentage = 50
+  payee_percentage = 50
+  resolution_notes = "Smoke test resolution - ambas partes de acuerdo"
+}
+$resolve = Invoke-JsonRequest -Method "PATCH" -Url "$base/v1/disputes/$disputeId/resolve" -Headers $authHeaders -Body $resolveBody
+if ($resolve.Status -lt 200 -or $resolve.Status -ge 300) {
+  Fail "Fallo resolver disputa. HTTP $($resolve.Status). Raw: $($resolve.Raw)"
+}
+Write-Host "OK dispute resolved" -ForegroundColor Green
+
+Write-Step "9) GET /v1/disputes/by-agreement/{agreementId}"
+$byAgreement = Invoke-JsonRequest -Method "GET" -Url "$base/v1/disputes/by-agreement/$agreementId" -Headers $authHeaders
+if ($byAgreement.Status -lt 200 -or $byAgreement.Status -ge 300) {
+  Fail "Fallo get disputes by agreement. HTTP $($byAgreement.Status)."
+}
+Write-Host "OK disputes by agreement count=$(@($byAgreement.Json.disputes).Count)" -ForegroundColor Green
+
 Write-Host ""
 Write-Host "Smoke test finalizado correctamente." -ForegroundColor Green
-Write-Host "Agreement creado: $agreementId"
+Write-Host "Agreement: $agreementId"
+Write-Host "Dispute: $disputeId"

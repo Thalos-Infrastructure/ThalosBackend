@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { OnEvent } from "@nestjs/event-emitter";
 import { Resend } from "resend";
 import { SupabaseService } from "../supabase/supabase.service";
 import {
@@ -19,6 +20,12 @@ import {
   disputeResolvedTemplate,
   agreementCompletedTemplate,
 } from "./templates";
+import {
+  DISPUTE_OPENED,
+  DISPUTE_RESOLVED,
+  type DisputeOpenedEventPayload,
+  type DisputeResolvedEventPayload,
+} from "../common/constants/notification-events";
 
 @Injectable()
 export class NotificationsService implements OnModuleInit {
@@ -241,5 +248,66 @@ export class NotificationsService implements OnModuleInit {
     
     if (emails.length === 0) return;
     await this.sendEmail(emails, subject, html);
+  }
+
+  @OnEvent(DISPUTE_OPENED)
+  async handleDisputeOpened(payload: DisputeOpenedEventPayload): Promise<void> {
+    const { data: agreement } = await this.supabase
+      .getClient()
+      .from("agreements")
+      .select("title, amount, asset")
+      .eq("id", payload.agreementId)
+      .maybeSingle();
+
+    if (!agreement) {
+      this.logger.warn(`Agreement ${payload.agreementId} not found for dispute notification`);
+      return;
+    }
+
+    const { data: openerProfile } = await this.supabase
+      .getClient()
+      .from("profiles")
+      .select("display_name")
+      .eq("wallet_address", payload.openedByWallet)
+      .maybeSingle();
+
+    await this.notifyDisputeOpened({
+      agreementId: payload.agreementId,
+      agreementTitle: (agreement as { title: string }).title,
+      disputeReason: payload.reason,
+      openedByWallet: payload.openedByWallet,
+      openedByName: openerProfile ? (openerProfile as { display_name: string }).display_name : undefined,
+    });
+  }
+
+  @OnEvent(DISPUTE_RESOLVED)
+  async handleDisputeResolved(payload: DisputeResolvedEventPayload): Promise<void> {
+    const { data: agreement } = await this.supabase
+      .getClient()
+      .from("agreements")
+      .select("title, amount, asset")
+      .eq("id", payload.agreementId)
+      .maybeSingle();
+
+    if (!agreement) {
+      this.logger.warn(`Agreement ${payload.agreementId} not found for dispute resolution notification`);
+      return;
+    }
+
+    const ag = agreement as { title: string; amount: string; asset: string };
+
+    const totalAmount = parseFloat(ag.amount);
+    const refundAmount = ((totalAmount * payload.payerPercentage) / 100).toFixed(2);
+    const releaseAmount = ((totalAmount * payload.payeePercentage) / 100).toFixed(2);
+
+    await this.notifyDisputeResolved({
+      agreementId: payload.agreementId,
+      agreementTitle: ag.title,
+      resolution: payload.resolutionNotes || "Dispute has been resolved",
+      resolvedByWallet: payload.resolvedByWallet,
+      refundAmount,
+      releaseAmount,
+      asset: ag.asset,
+    });
   }
 }

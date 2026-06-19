@@ -51,7 +51,7 @@ The server listens on port **3001** by default with a global `v1` prefix.
 ### Scripts
 
 | Command | Description |
-|---|---|
+|---|---|---|
 | `pnpm run start:dev` | Start in watch mode (development) |
 | `pnpm run start` | Start without watch |
 | `pnpm run build` | Compile to `dist/` |
@@ -129,6 +129,17 @@ The Trustless Work relay only allows paths under `deployer/`, `escrow/`, and `he
 ## Database & migrations
 
 SQL migrations live under [`scripts/`](scripts). Apply them to the Supabase project before running the API.
+
+## Notifications (EventEmitter2)
+
+Transactional email notifications are wired through in-process **EventEmitter2** events — no direct coupling between modules.
+
+- `DisputesService.openDispute()` emits `dispute.opened` → `NotificationsService.handleDisputeOpened()` looks up agreement title + opener name and sends email
+- `DisputesService.resolveDispute()` emits `dispute.resolved` → `NotificationsService.handleDisputeResolved()` calculates refund/release amounts and sends email
+
+Event name constants live in `src/common/constants/notification-events.ts` (single source of truth, no string literals).
+
+If `RESEND_API_KEY` is not set, emails are skipped with a warning log — the originating action is never blocked.
 
 ## Docs
 
