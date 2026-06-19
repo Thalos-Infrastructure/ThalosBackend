@@ -1,26 +1,17 @@
-import { Controller, Get, Param, Query, UseGuards } from "@nestjs/common";
+import { BadRequestException, Controller, Get, Param, Query, UseGuards } from "@nestjs/common";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import { InternalTrustlessService } from "./internal-trustless.service";
+import { relayToTrustless } from "./trustless-relay.helper";
 
 @Controller("escrows")
 @UseGuards(JwtAuthGuard)
 export class EscrowsController {
-  constructor(private readonly trustlessService: InternalTrustlessService) {}
-
-  /**
-   * GET /escrows/by-signer/:address
-   * Get all escrows where the address is a signer
-   */
   @Get("by-signer/:address")
   async getEscrowsBySigner(@Param("address") address: string) {
-    return this.trustlessService.getEscrowsBySigner(address);
+    const result = await relayToTrustless("GET", "helper/get-escrows-by-signer", { address });
+    if (result.status >= 400) throw new BadRequestException(result.data);
+    return result.data;
   }
 
-  /**
-   * GET /escrows/by-role
-   * Get escrows filtered by role, status, and type
-   * Query params: address (required), role, status, type
-   */
   @Get("by-role")
   async getEscrowsByRole(
     @Query("address") address: string,
@@ -28,11 +19,12 @@ export class EscrowsController {
     @Query("status") status?: string,
     @Query("type") type?: "single-release" | "multi-release",
   ) {
-    return this.trustlessService.getEscrowsByRole({
-      address,
-      role,
-      status,
-      type,
-    });
+    const query: Record<string, string> = { address };
+    if (role) query.role = role;
+    if (status) query.status = status;
+    if (type) query.type = type;
+    const result = await relayToTrustless("GET", "helper/get-escrows-by-role", query);
+    if (result.status >= 400) throw new BadRequestException(result.data);
+    return result.data;
   }
 }
