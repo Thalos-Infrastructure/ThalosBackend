@@ -1,0 +1,33 @@
+### Milestone event sample requests
+### Run after: pnpm run start:dev
+### Variables
+@host = http://localhost:3001
+@agreementId = PUT-A-REAL-AGREEMENT-ID-HERE
+@actorWallet = PUT-A-WALLET-THAT-MATCHES-auth_users.wallet_public_key
+@jwt = PUT-A-VALID-APP-JWT
+@milestoneIndex = 0
+
+### Approve a milestone -> emits `milestone.approved`
+PATCH {{host}}/v1/agreements/{{agreementId}}/milestones
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+{
+  "milestone_index": {{milestoneIndex}},
+  "status": "approved",
+  "actor_wallet": "{{actorWallet}}"
+}
+
+### Submit evidence on a pending milestone -> emits `evidence.submitted`
+PATCH {{host}}/v1/agreements/{{agreementId}}/milestones
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+{
+  "milestone_index": {{milestoneIndex}},
+  "status": "pending",
+  "actor_wallet": "{{actorWallet}}",
+  "evidence_description": "Uploaded the design files for milestone {{milestoneIndex}}. Ready for review.",
+  "evidence_url": "https://example.com/evidence/milestone-{{milestoneIndex}}.pdf",
+  "submitter_name": "Alice (designer)"
+}

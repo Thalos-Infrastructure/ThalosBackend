@@ -26,7 +26,14 @@ export interface EvidenceSubmittedData {
   milestoneDescription: string;
   submittedByWallet: string;
   submittedByName?: string;
+  /** Free-form description supplied by the submitter. */
   evidenceDescription?: string;
+  /**
+   * Optional URL pointing at the uploaded evidence file (IPFS, S3, etc.).
+   * Rendered as a separate link in the email body so the URL stays
+   * clickable and grep-able instead of being collapsed into a text blob.
+   */
+  evidenceUrl?: string;
 }
 
 export interface MilestoneApprovedData {
