@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { OnEvent } from "@nestjs/event-emitter";
 import { Resend } from "resend";
 import { SupabaseService } from "../supabase/supabase.service";
 import {
@@ -19,6 +20,10 @@ import {
   disputeResolvedTemplate,
   agreementCompletedTemplate,
 } from "./templates";
+import {
+  AgreementEventName,
+  type AgreementEventPayload,
+} from "../events/agreement-events";
 
 @Injectable()
 export class NotificationsService implements OnModuleInit {
@@ -238,8 +243,47 @@ export class NotificationsService implements OnModuleInit {
       const email = await this.getEmailForWallet(wallet);
       if (email) emails.push(email);
     }
-    
+
     if (emails.length === 0) return;
     await this.sendEmail(emails, subject, html);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Event listeners — see src/events/agreement-events.ts for the typed event
+  // contract. These methods are intentionally narrow: they do nothing but
+  // forward an event payload to the corresponding typed notify* method.
+  // Sync `@OnEvent` listeners run on the same tick as `emit()` so we wrap the
+  // notifier call in an async-IIFE + try/catch so a failure here never bubbles
+  // back into the AgreementsService that emitted the event.
+  // ---------------------------------------------------------------------------
+
+  @OnEvent(AgreementEventName.MilestoneApproved)
+  async handleMilestoneApproved(
+    payload: AgreementEventPayload<typeof AgreementEventName.MilestoneApproved>,
+  ): Promise<void> {
+    try {
+      await this.notifyMilestoneApproved(payload);
+    } catch (err) {
+      this.logger.error(
+        `handleMilestoneApproved failed (non-fatal): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  @OnEvent(AgreementEventName.EvidenceSubmitted)
+  async handleEvidenceSubmitted(
+    payload: AgreementEventPayload<typeof AgreementEventName.EvidenceSubmitted>,
+  ): Promise<void> {
+    try {
+      await this.notifyEvidenceSubmitted(payload);
+    } catch (err) {
+      this.logger.error(
+        `handleEvidenceSubmitted failed (non-fatal): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 }

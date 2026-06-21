@@ -96,15 +96,23 @@ export function agreementFundedTemplate(data: AgreementFundedData): string {
 }
 
 export function evidenceSubmittedTemplate(data: EvidenceSubmittedData): string {
+  const evidenceLink = data.evidenceUrl
+    ? `<tr>
+          <td style="padding: 8px 0; color: #6b6b80; vertical-align: top;">Evidence link:</td>
+          <td style="padding: 8px 0; color: #1a1a2e; word-break: break-all;">
+            <a href="${data.evidenceUrl}" style="color: #6366f1; text-decoration: none;">${data.evidenceUrl}</a>
+          </td>
+        </tr>`
+    : "";
   const content = `
     <h2 style="color: #1a1a2e; margin: 0 0 16px;">Evidence Submitted</h2>
     <p style="color: #4a4a68; margin: 0 0 24px;">
       New evidence has been submitted for milestone review.
     </p>
-    
+
     <div style="background: #fef3c7; border-radius: 8px; padding: 20px; margin-bottom: 24px; border-left: 4px solid #f59e0b;">
       <h3 style="color: #1a1a2e; margin: 0 0 12px; font-size: 18px;">${data.agreementTitle}</h3>
-      
+
       <table style="width: 100%; border-collapse: collapse;">
         <tr>
           <td style="padding: 8px 0; color: #6b6b80; width: 120px;">Milestone:</td>
@@ -116,10 +124,11 @@ export function evidenceSubmittedTemplate(data: EvidenceSubmittedData): string {
         </tr>
         ${data.evidenceDescription ? `
         <tr>
-          <td style="padding: 8px 0; color: #6b6b80;">Description:</td>
-          <td style="padding: 8px 0; color: #1a1a2e;">${data.evidenceDescription}</td>
+          <td style="padding: 8px 0; color: #6b6b80; vertical-align: top;">Description:</td>
+          <td style="padding: 8px 0; color: #1a1a2e; white-space: pre-wrap;">${data.evidenceDescription}</td>
         </tr>
         ` : ""}
+        ${evidenceLink}
       </table>
     </div>
     

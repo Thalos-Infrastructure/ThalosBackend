@@ -1,17 +1,41 @@
 import {
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { SupabaseService } from "../supabase/supabase.service";
 import { CreateAgreementDto } from "./dto/create-agreement.dto";
 import { LinkContractDto } from "./dto/link-contract.dto";
 import { UpdateAgreementStatusDto } from "./dto/update-status.dto";
 import { UpdateMilestoneDto } from "./dto/update-milestone.dto";
+import {
+  AgreementEventName,
+  type AgreementEventPayload,
+} from "../events/agreement-events";
+
+/**
+ * Shape of the milestone JSON column stored in `agreements.milestones`.
+ * Adding optional `evidence_description` / `evidence_url` is backward
+ * compatible: existing readers (e.g. dashboards) ignore unknown keys.
+ */
+type StoredMilestone = {
+  description: string;
+  amount: string;
+  status: string;
+  evidence_description?: string;
+  evidence_url?: string;
+};
 
 @Injectable()
 export class AgreementsService {
-  constructor(private readonly supabase: SupabaseService) {}
+  private readonly logger = new Logger(AgreementsService.name);
+
+  constructor(
+    private readonly supabase: SupabaseService,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
 
   private async walletForUserId(userId: string): Promise<string | null> {
     const { data, error } = await this.supabase
@@ -210,10 +234,13 @@ export class AgreementsService {
     await this.assertCanAccessAgreement(userId, agreementId);
     await this.assertActorWallet(userId, dto.actor_wallet);
 
+    // Select additional columns so we can enrich the event payload with
+    // the agreement title, amount and asset the listener needs to send
+    // the milestone.approved / evidence.submitted emails.
     const { data: agreement, error: fetchError } = await this.supabase
       .getClient()
       .from("agreements")
-      .select("milestones")
+      .select("id, title, amount, asset, milestones")
       .eq("id", agreementId)
       .single();
 
@@ -221,11 +248,7 @@ export class AgreementsService {
       return { success: false, error: fetchError?.message || "Not found" };
     }
 
-    const milestones = agreement.milestones as Array<{
-      description: string;
-      amount: string;
-      status: string;
-    }>;
+    const milestones = (agreement.milestones ?? []) as StoredMilestone[];
     if (
       dto.milestone_index < 0 ||
       dto.milestone_index >= milestones.length
@@ -233,7 +256,17 @@ export class AgreementsService {
       return { success: false, error: "Invalid milestone index" };
     }
 
-    milestones[dto.milestone_index].status = dto.status;
+    const milestone = milestones[dto.milestone_index];
+    milestone.status = dto.status;
+    // Persist any attached evidence onto the milestone slice itself so that
+    // downstream readers (dashboards, dispute tooling) can see it without
+    // having to join on the event log. Both fields are optional and additive.
+    if (dto.evidence_description !== undefined) {
+      milestone.evidence_description = dto.evidence_description;
+    }
+    if (dto.evidence_url !== undefined) {
+      milestone.evidence_url = dto.evidence_url;
+    }
 
     const { error: updateError } = await this.supabase
       .getClient()
@@ -252,10 +285,105 @@ export class AgreementsService {
       `milestone_${dto.status}`,
       {
         milestone_index: dto.milestone_index,
-        milestone_description: milestones[dto.milestone_index].description,
+        milestone_description: milestone.description,
+        ...(dto.evidence_description
+          ? { evidence_description: dto.evidence_description }
+          : {}),
+        ...(dto.evidence_url ? { evidence_url: dto.evidence_url } : {}),
       },
     );
+
+    // Emit domain events for downstream listeners (email notifications today,
+    // disputes/analytics tomorrow). Both emits are wrapped in try/catch so a
+    // buggy / unavailable listener (e.g. Resend down) cannot break the
+    // originating domain action - this satisfies the DoD:
+    // "A failing email never breaks the originating domain action".
+    this.emitMilestoneEvents(agreement, milestone, dto);
+
     return { success: true, error: null };
+  }
+
+  /**
+   * Fire-and-forget emission of milestone.approved and evidence.submitted.
+   * Envelopes are constructed from the typed payload map so listeners get a
+   * strictly typed `MilestoneApprovedData` / `EvidenceSubmittedData`.
+   */
+  private emitMilestoneEvents(
+    agreement: { id: string; title: string; amount: string; asset: string },
+    milestone: StoredMilestone,
+    dto: UpdateMilestoneDto,
+  ): void {
+    const submittedByName = dto.submitter_name;
+
+    const hasEvidence =
+      Boolean(dto.evidence_description) || Boolean(dto.evidence_url);
+
+    if (dto.status === "approved") {
+      const payload: AgreementEventPayload<
+        typeof AgreementEventName.MilestoneApproved
+      > = {
+        agreementId: agreement.id,
+        agreementTitle: agreement.title,
+        milestoneIndex: dto.milestone_index,
+        milestoneDescription: milestone.description,
+        milestoneAmount: milestone.amount,
+        asset: agreement.asset,
+        approvedByWallet: dto.actor_wallet,
+        approvedByName: submittedByName,
+      };
+      this.safeEmit(AgreementEventName.MilestoneApproved, payload);
+    }
+
+    if (hasEvidence) {
+      // Keep `evidence_description` and `evidence_url` as separate structured
+      // fields so the email template can render the URL as a clickable link
+      // instead of collapsing both into a single text blob.
+      const payload: AgreementEventPayload<
+        typeof AgreementEventName.EvidenceSubmitted
+      > = {
+        agreementId: agreement.id,
+        agreementTitle: agreement.title,
+        milestoneIndex: dto.milestone_index,
+        milestoneDescription: milestone.description,
+        submittedByWallet: dto.actor_wallet,
+        submittedByName,
+        evidenceDescription: dto.evidence_description,
+        evidenceUrl: dto.evidence_url,
+      };
+      this.safeEmit(AgreementEventName.EvidenceSubmitted, payload);
+    }
+  }
+
+  /**
+   * Wraps `EventEmitter2.emit` (which is synchronous and fire-and-forget) so
+   * any failure during dispatch - including a synchronous throw from a
+   * listener - never bubbles back into the AgreementsService call site.
+   *
+   * Justification: by DoD requirement, *a failing email must never break the
+   * originating domain action.* @nestjs/event-emitter auto-rejects the
+   * returned Promise of async `@OnEvent` listeners, so an `await emitAsync`
+   * call would surface that, but `emit()` (sync) does NOT swallow sync throws
+   * from listeners - a buggy listener that throws synchronously would
+   * otherwise be re-thrown into `updateMilestone()` and could 500 the API.
+   * Hence the try/catch here, in addition to the try/catch on the listener
+   * side that covers async errors.
+   *
+   * Returns `true` when the event was successfully dispatched, `false` when
+   * an error happened (used for observability; callers ignore the value).
+   */
+  private safeEmit(eventName: string, payload: unknown): boolean {
+    try {
+      this.eventEmitter.emit(eventName, payload);
+      return true;
+    } catch (err) {
+      // `warn` (not `error`) because this is non-fatal by design - DoD.
+      this.logger.warn(
+        `Failed to emit domain event "${eventName}" (swallowed, non-fatal): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return false;
+    }
   }
 
   async listByWallet(userId: string, wallet: string) {
