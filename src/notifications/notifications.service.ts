@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { Resend } from "resend";
 import { SupabaseService } from "../supabase/supabase.service";
 import {
@@ -20,22 +21,62 @@ import {
   agreementCompletedTemplate,
 } from "./templates";
 
+/**
+ * Fallback sender address used when EMAIL_FROM is not configured.
+ *
+ * Keeping the same domain as the historical default so existing Resend
+ * domain verifications continue to work out-of-the-box. Override by setting
+ * EMAIL_FROM (and optionally EMAIL_REPLY_TO) in the environment.
+ *
+ * Variable names intentionally match the Thalos frontend
+ * (`lib/email/resend.ts` → `EMAIL_FROM`, `EMAIL_REPLY_TO`).
+ */
+const DEFAULT_FROM_EMAIL = "Thalos <notifications@thalosplatform.xyz>";
+const DEFAULT_REPLY_TO = "Thalos <no-reply@thalosplatform.xyz>";
+
+/**
+ * Read an env var via ConfigService, trimming whitespace, falling back to
+ * `fallback` when unset or blank. Centralised so tests can rely on the same
+ * parsing rules as production.
+ */
+function pickFromEnv(
+  config: ConfigService,
+  key: string,
+  fallback: string,
+): string {
+  const raw = config.get<string>(key);
+  if (raw == null) return fallback;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+}
+
 @Injectable()
 export class NotificationsService implements OnModuleInit {
   private readonly logger = new Logger(NotificationsService.name);
-  private resend: Resend;
-  private readonly fromEmail = "Thalos <notifications@thalosplatform.xyz>";
+  private resend: Resend | null = null;
+  private readonly fromEmail: string;
+  private readonly replyTo: string;
 
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(
+    private readonly supabase: SupabaseService,
+    private readonly config: ConfigService,
+  ) {
+    this.fromEmail = pickFromEnv(this.config, "EMAIL_FROM", DEFAULT_FROM_EMAIL);
+    this.replyTo = pickFromEnv(this.config, "EMAIL_REPLY_TO", DEFAULT_REPLY_TO);
+  }
 
   onModuleInit() {
-    const apiKey = process.env.RESEND_API_KEY;
+    const apiKey = this.config.get<string>("RESEND_API_KEY");
     if (!apiKey) {
-      this.logger.warn("RESEND_API_KEY not configured - email notifications disabled");
+      this.logger.warn(
+        "RESEND_API_KEY not configured - email notifications disabled",
+      );
       return;
     }
     this.resend = new Resend(apiKey);
-    this.logger.log("Resend email client initialized");
+    this.logger.log(
+      `Resend client initialized (from="${this.fromEmail}", replyTo="${this.replyTo}")`,
+    );
   }
 
   /**
@@ -81,7 +122,9 @@ export class NotificationsService implements OnModuleInit {
   }
 
   /**
-   * Send email using Resend
+   * Send email using Resend. Mirrors the frontend payload shape (`replyTo`
+   * always present, never undefined, so Resend's API contract is satisfied
+   * even when only `from` is overridden).
    */
   private async sendEmail(
     to: string | string[],
@@ -105,6 +148,7 @@ export class NotificationsService implements OnModuleInit {
         to: recipients,
         subject,
         html,
+        replyTo: this.replyTo,
       });
 
       if (error) {
@@ -112,7 +156,9 @@ export class NotificationsService implements OnModuleInit {
         return false;
       }
 
-      this.logger.log(`Email sent to ${recipients.length} recipient(s): ${subject}`);
+      this.logger.log(
+        `Email sent to ${recipients.length} recipient(s): ${subject}`,
+      );
       return true;
     } catch (err) {
       this.logger.error("Error sending email", err);
@@ -238,7 +284,7 @@ export class NotificationsService implements OnModuleInit {
       const email = await this.getEmailForWallet(wallet);
       if (email) emails.push(email);
     }
-    
+
     if (emails.length === 0) return;
     await this.sendEmail(emails, subject, html);
   }

@@ -16,7 +16,15 @@ import { WalletsModule } from "./wallets/wallets.module";
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    // Load `.env.local` first so local overrides win, then fall back to `.env`.
+    // Keeps `.env` as the canonical set of defaults across environments while
+    // letting each developer (or ephemeral deploy) tweak `.env.local` without
+    // committing secrets. Variable names match the frontend convention used by
+    // `lib/email/resend.ts`.
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: [".env.local", ".env"],
+    }),
     CommonModule,
     SupabaseModule,
     AuthModule,
