@@ -59,8 +59,28 @@ The server listens on port **3001** by default with a global `v1` prefix.
 | `pnpm run start` | Start without watch |
 | `pnpm run build` | Compile to `dist/` |
 | `pnpm run start:prod` | Run the compiled build (`node dist/main`) |
+| `npm run test` | Run the Jest test suite |
 
 There is also a `smoke-test-backend.ps1` PowerShell script for a quick end-to-end check.
+
+### Testing
+
+Tests use Jest with `ts-jest`.
+
+```bash
+npm run test
+```
+
+For services that depend on Supabase, mock `SupabaseService.getClient()` instead of
+loading real Supabase environment variables. Reuse the chainable helpers from
+[`test/supabase.mock.ts`](test/supabase.mock.ts):
+
+```ts
+const query = createSupabaseQueryMock({ data: [], error: null, count: 0 });
+const client = createSupabaseClientMock(query);
+
+{ provide: SupabaseService, useValue: { getClient: jest.fn(() => client) } }
+```
 
 ## Architecture
 
