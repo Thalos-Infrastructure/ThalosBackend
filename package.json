@@ -2,6 +2,9 @@
   "name": "thalos-backend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "nest build",
     "start": "nest start",
