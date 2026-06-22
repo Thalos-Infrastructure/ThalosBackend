@@ -4,8 +4,13 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { SupabaseService } from "../supabase/supabase.service";
 import { AgreementsService } from "../agreements/agreements.service";
+import {
+  DISPUTE_OPENED,
+  DISPUTE_RESOLVED,
+} from "../common/constants/notification-events";
 import {
   OpenDisputeDto,
   AssignResolverDto,
@@ -42,7 +47,8 @@ export interface DisputeResolution {
 export class DisputesService {
   constructor(
     private readonly supabase: SupabaseService,
-    private readonly agreements: AgreementsService
+    private readonly agreements: AgreementsService,
+    private readonly eventEmitter: EventEmitter2
   ) {}
 
   private async walletForUserId(userId: string): Promise<string | null> {
@@ -157,6 +163,13 @@ export class DisputesService {
 
     await this.logActivity(dto.agreement_id, dto.opened_by, "dispute_opened", {
       dispute_id: dispute.id,
+      reason: dto.reason,
+    });
+
+    this.eventEmitter.emit(DISPUTE_OPENED, {
+      disputeId: dispute.id,
+      agreementId: dto.agreement_id,
+      openedByWallet: dto.opened_by,
       reason: dto.reason,
     });
 
@@ -289,6 +302,15 @@ export class DisputesService {
         resolution_notes: dto.resolution_notes,
       }
     );
+
+    this.eventEmitter.emit(DISPUTE_RESOLVED, {
+      disputeId,
+      agreementId: dispute.agreement_id,
+      resolvedByWallet: dto.resolved_by,
+      payerPercentage: dto.payer_percentage,
+      payeePercentage: dto.payee_percentage,
+      resolutionNotes: dto.resolution_notes || "",
+    });
 
     return { resolution: resolution as DisputeResolution, error: null };
   }

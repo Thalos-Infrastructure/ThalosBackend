@@ -1,8 +1,10 @@
+import { createHmac, randomBytes } from "crypto";
 import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -442,5 +444,53 @@ export class WalletsService {
 
     if (error || !data) return null;
     return data as UserWallet;
+  }
+
+  /**
+   * Generate a stateless wallet ownership verification challenge (SEP-0043 style).
+   * HMAC-SHA256 signed with JWT_SECRET.
+   */
+  generateVerificationChallenge(
+    userId: string,
+    address: string,
+  ): { message: string; expires_at: string } {
+    const TTL_MS = 5 * 60 * 1000;
+    const issuedAt = new Date();
+    const expiresAt = new Date(issuedAt.getTime() + TTL_MS);
+    const nonce = randomBytes(16).toString("hex");
+
+    const payload = {
+      v: 1,
+      sub: userId,
+      addr: address,
+      nonce,
+      exp: Math.floor(expiresAt.getTime() / 1000),
+    };
+    const payloadB64 = Buffer.from(JSON.stringify(payload)).toString(
+      "base64url",
+    );
+
+    const secret = this.config.get<string>("JWT_SECRET");
+    if (!secret) {
+      throw new InternalServerErrorException("Server misconfiguration");
+    }
+
+    const sig = createHmac("sha256", secret)
+      .update(payloadB64)
+      .digest("base64url");
+
+    const message =
+      `Thalos Wallet Ownership Proof\n` +
+      `\n` +
+      `I authorize linking this wallet to my Thalos account.\n` +
+      `Account: ${userId}\n` +
+      `Wallet: ${address}\n` +
+      `Nonce: ${nonce}\n` +
+      `Issued At: ${issuedAt.toISOString()}\n` +
+      `Expires At: ${expiresAt.toISOString()}\n` +
+      `\n` +
+      `Proof: ${payloadB64}.${sig}`;
+
+    return { message, expires_at: expiresAt.toISOString() };
   }
 }

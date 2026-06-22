@@ -3,15 +3,20 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { SupabaseService } from "../supabase/supabase.service";
 import { CreateAgreementDto } from "./dto/create-agreement.dto";
 import { LinkContractDto } from "./dto/link-contract.dto";
 import { UpdateAgreementStatusDto } from "./dto/update-status.dto";
 import { UpdateMilestoneDto } from "./dto/update-milestone.dto";
+import { AGREEMENT_EVENTS } from "../common/events/agreement-events.constants";
 
 @Injectable()
 export class AgreementsService {
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(
+    private readonly supabase: SupabaseService,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
 
   private async walletForUserId(userId: string): Promise<string | null> {
     const { data, error } = await this.supabase
@@ -139,6 +144,16 @@ export class AgreementsService {
       amount: dto.amount,
     });
 
+    this.eventEmitter.emit(AGREEMENT_EVENTS.CREATED, {
+      agreementId:        agreement.id,
+      title:              dto.title,
+      description:        dto.description,
+      amount:             dto.amount,
+      asset:              dto.asset ?? "USDC",
+      createdByWallet:    dto.created_by,
+      participantWallets: dto.participants.map((p) => p.wallet_address),
+    });
+
     return { agreement, error: null };
   }
 
@@ -199,6 +214,41 @@ export class AgreementsService {
       `status_changed_to_${dto.status}`,
       { status: dto.status },
     );
+
+    if (dto.status === "funded") {
+      const { data: row } = await this.supabase
+        .getClient()
+        .from("agreements")
+        .select("title, amount, asset")
+        .eq("id", agreementId)
+        .single();
+      if (row) {
+        this.eventEmitter.emit(AGREEMENT_EVENTS.FUNDED, {
+          agreementId,
+          title:          row.title,
+          amount:         row.amount,
+          asset:          row.asset ?? "USDC",
+          fundedByWallet: dto.actor_wallet,
+        });
+      }
+    } else if (dto.status === "completed" || dto.status === "resolved") {
+      const { data: row } = await this.supabase
+        .getClient()
+        .from("agreements")
+        .select("title, amount, asset")
+        .eq("id", agreementId)
+        .single();
+      if (row) {
+        this.eventEmitter.emit(AGREEMENT_EVENTS.COMPLETED, {
+          agreementId,
+          title:       row.title,
+          totalAmount: row.amount,
+          asset:       row.asset ?? "USDC",
+          completedAt: new Date().toISOString(),
+        });
+      }
+    }
+
     return { success: true, error: null };
   }
 
