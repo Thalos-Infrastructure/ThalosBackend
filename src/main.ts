@@ -54,6 +54,7 @@ async function bootstrap() {
 
   const port = Number(process.env.PORT) || 3001;
   await app.listen(port);
+  console.log(`[Config] ENV_SOURCE=${process.env.ENV_SOURCE ?? '(not set)'} — port ${port}`);
 }
 
 void bootstrap();

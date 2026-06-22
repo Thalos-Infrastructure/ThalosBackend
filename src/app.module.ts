@@ -18,7 +18,7 @@ import { EventsModule } from './events/events.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env.local', '.env'] }),
     EventEmitterModule.forRoot(),
     CommonModule,
     SupabaseModule,
