@@ -11,4 +11,13 @@ export class UpdateMilestoneDto {
 
   @IsString()
   actor_wallet: string;
+
+  @IsOptional()
+  @IsString()
+  evidence_description?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  evidence_urls?: string[];
 }

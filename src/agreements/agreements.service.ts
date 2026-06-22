@@ -253,12 +253,30 @@ export class AgreementsService {
       description: string;
       amount: string;
       status: string;
+      evidence_description?: string;
+      evidence_urls?: string[];
+      evidence_submitted_at?: string;
     }>;
     if (dto.milestone_index < 0 || dto.milestone_index >= milestones.length) {
       return { success: false, error: 'Invalid milestone index' };
     }
 
-    milestones[dto.milestone_index].status = dto.status;
+    const milestone = milestones[dto.milestone_index];
+    const previousStatus = milestone.status;
+    const emitsEvidence =
+      dto.evidence_description !== undefined || dto.evidence_urls !== undefined;
+
+    milestone.status = dto.status;
+
+    if (dto.evidence_description !== undefined) {
+      milestone.evidence_description = dto.evidence_description;
+    }
+    if (dto.evidence_urls !== undefined) {
+      milestone.evidence_urls = dto.evidence_urls;
+    }
+    if (emitsEvidence) {
+      milestone.evidence_submitted_at = new Date().toISOString();
+    }
 
     const { error: updateError } = await this.supabase
       .getClient()

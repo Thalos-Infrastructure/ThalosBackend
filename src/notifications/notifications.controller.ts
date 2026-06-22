@@ -60,9 +60,12 @@ export class NotificationsController {
       agreementTitle: dto.agreement_title,
       milestoneIndex: dto.milestone_index,
       milestoneDescription: dto.milestone_description,
+      milestoneAmount: dto.milestone_amount,
+      asset: dto.asset,
       submittedByWallet: dto.submitted_by_wallet,
       submittedByName: dto.submitted_by_name,
       evidenceDescription: dto.evidence_description,
+      evidenceUrls: dto.evidence_urls,
     });
     return { success: true };
   }
