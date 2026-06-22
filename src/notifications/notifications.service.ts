@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { Resend } from "resend";
 import { SupabaseService } from "../supabase/supabase.service";
 import {
@@ -24,9 +25,18 @@ import {
 export class NotificationsService implements OnModuleInit {
   private readonly logger = new Logger(NotificationsService.name);
   private resend: Resend;
-  private readonly fromEmail = "Thalos <notifications@thalosplatform.xyz>";
+  private readonly fromEmail: string;
+  private readonly replyTo?: string;
 
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(
+    private readonly supabase: SupabaseService,
+    private readonly config: ConfigService,
+  ) {
+    this.fromEmail =
+      this.config.get<string>("EMAIL_FROM") ||
+      "Thalos <notifications@thalosplatform.xyz>";
+    this.replyTo = this.config.get<string>("EMAIL_REPLY_TO") || undefined;
+  }
 
   onModuleInit() {
     const apiKey = process.env.RESEND_API_KEY;
@@ -105,6 +115,7 @@ export class NotificationsService implements OnModuleInit {
         to: recipients,
         subject,
         html,
+        ...(this.replyTo ? { reply_to: this.replyTo } : {}),
       });
 
       if (error) {
