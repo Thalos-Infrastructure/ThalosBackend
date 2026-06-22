@@ -13,7 +13,18 @@ import {
   CancelDisputeDto,
 } from "./dto/disputes.dto";
 
-export type DisputeStatus = "open" | "under_review" | "resolved" | "cancelled";
+/**
+ * Canonical dispute statuses:
+ * - open: dispute has been opened but no resolver assigned yet
+ * - under_review: a resolver has been assigned and is actively reviewing the dispute
+ * - assigned: legacy alias for under_review (accepted for backward compatibility, normalized to under_review on write)
+ * - resolved: final resolution has been recorded
+ * - cancelled: dispute was cancelled by the opener
+ */
+export type DisputeStatus = "open" | "under_review" | "assigned" | "resolved" | "cancelled";
+
+/** Canonical active dispute statuses (treated identically in queries). */
+const ACTIVE_DISPUTE_STATUSES: DisputeStatus[] = ["open", "under_review", "assigned"];
 
 export interface Dispute {
   id: string;
@@ -121,7 +132,7 @@ export class DisputesService {
       .from("disputes")
       .select("id")
       .eq("agreement_id", dto.agreement_id)
-      .in("status", ["open", "under_review"])
+      .in("status", ACTIVE_DISPUTE_STATUSES)
       .maybeSingle();
 
     if (existingDispute) {
@@ -181,7 +192,12 @@ export class DisputesService {
 
     await this.assertCanAccessAgreement(userId, dispute.agreement_id);
 
-    if (dispute.status !== "open") {
+    // Accept 'open' for new disputes; 'under_review' or legacy 'assigned' for re-assignment
+    if (
+      dispute.status !== "open" &&
+      dispute.status !== "under_review" &&
+      dispute.status !== "assigned"
+    ) {
       throw new BadRequestException(
         "Can only assign resolver to open disputes"
       );
@@ -234,8 +250,12 @@ export class DisputesService {
       throw new NotFoundException("Dispute not found");
     }
 
-    if (dispute.status === "resolved") {
-      throw new BadRequestException("Dispute is already resolved");
+    if (dispute.status === "resolved" || dispute.status === "cancelled") {
+      throw new BadRequestException(
+        dispute.status === "resolved"
+          ? "Dispute is already resolved"
+          : "Cannot resolve a cancelled dispute"
+      );
     }
 
     // Create resolution
@@ -311,8 +331,12 @@ export class DisputesService {
       throw new ForbiddenException("Only the dispute opener can cancel it");
     }
 
-    if (dispute.status === "resolved") {
-      throw new BadRequestException("Cannot cancel a resolved dispute");
+    if (dispute.status === "resolved" || dispute.status === "cancelled") {
+      throw new BadRequestException(
+        dispute.status === "resolved"
+          ? "Cannot cancel a resolved dispute"
+          : "Dispute is already cancelled"
+      );
     }
 
     const { error } = await this.supabase
@@ -361,7 +385,7 @@ export class DisputesService {
         )
       `
       )
-      .in("status", ["open", "under_review"])
+      .in("status", ACTIVE_DISPUTE_STATUSES)
       .order("created_at", { ascending: false });
 
     if (error) {
