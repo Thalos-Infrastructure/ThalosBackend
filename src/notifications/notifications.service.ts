@@ -33,10 +33,14 @@ export class NotificationsService implements OnModuleInit {
   private resend: Resend;
   private readonly fromEmail = 'Thalos <notifications@thalosplatform.xyz>';
 
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(
+    private readonly supabase: SupabaseService,
+    private readonly configService: ConfigService
+  ) {}
 
   onModuleInit() {
-    const apiKey = process.env.RESEND_API_KEY;
+    this.fromEmail = this.configService.get<string>("EMAIL_FROM", "Thalos <notifications@thalosplatform.xyz>");
+    const apiKey = this.configService.get<string>("RESEND_API_KEY");
     if (!apiKey) {
       this.logger.warn('RESEND_API_KEY not configured - email notifications disabled');
       return;
