@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsIn } from "class-validator";
+import { IsString, IsNotEmpty, IsOptional, IsIn } from 'class-validator';
 
 export class GetOrCreateProfileDto {
   @IsString()
@@ -6,9 +6,9 @@ export class GetOrCreateProfileDto {
   wallet_address: string;
 
   @IsString()
-  @IsIn(["personal", "enterprise"])
+  @IsIn(['personal', 'enterprise'])
   @IsOptional()
-  account_type?: "personal" | "enterprise";
+  account_type?: 'personal' | 'enterprise';
 }
 
 export class UpdateProfileDto {
@@ -25,9 +25,9 @@ export class UpdateProfileDto {
   avatar_url?: string;
 
   @IsString()
-  @IsIn(["personal", "enterprise"])
+  @IsIn(['personal', 'enterprise'])
   @IsOptional()
-  account_type?: "personal" | "enterprise";
+  account_type?: 'personal' | 'enterprise';
 }
 
 export class SetUserRoleDto {
@@ -36,6 +36,6 @@ export class SetUserRoleDto {
   wallet_address: string;
 
   @IsString()
-  @IsIn(["user", "validator", "dispute_resolver", "admin"])
-  role: "user" | "validator" | "dispute_resolver" | "admin";
+  @IsIn(['user', 'validator', 'dispute_resolver', 'admin'])
+  role: 'user' | 'validator' | 'dispute_resolver' | 'admin';
 }

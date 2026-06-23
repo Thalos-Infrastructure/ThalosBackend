@@ -1,13 +1,5 @@
-import { Type } from "class-transformer";
-import {
-  IsInt,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Max,
-  Min,
-} from "class-validator";
+import { Type } from 'class-transformer';
+import { IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
 
 export class SearchUsersDto {
   @IsString()

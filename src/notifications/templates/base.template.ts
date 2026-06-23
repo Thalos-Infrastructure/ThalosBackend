@@ -87,7 +87,7 @@ export function formatWallet(wallet: string): string {
  */
 export function formatAmount(amount: string, asset: string): string {
   const numAmount = parseFloat(amount);
-  const formatted = numAmount.toLocaleString("en-US", {
+  const formatted = numAmount.toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 6,
   });

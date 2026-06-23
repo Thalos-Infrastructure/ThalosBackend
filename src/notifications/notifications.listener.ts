@@ -1,12 +1,12 @@
-import { Injectable, Logger } from "@nestjs/common";
-import { OnEvent } from "@nestjs/event-emitter";
-import { NotificationsService } from "./notifications.service";
-import { AGREEMENT_EVENTS } from "../common/events/agreement-events.constants";
+import { Injectable, Logger } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
+import { NotificationsService } from './notifications.service';
+import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
 import {
   AgreementCreatedData,
   AgreementFundedData,
   AgreementCompletedData,
-} from "./types/notification-data.types";
+} from './types/notification-data.types';
 
 @Injectable()
 export class NotificationsListener {
@@ -19,7 +19,7 @@ export class NotificationsListener {
     try {
       await this.notifications.notifyAgreementCreated(data);
     } catch (err) {
-      this.logger.error("handleAgreementCreated failed", err);
+      this.logger.error('handleAgreementCreated failed', err);
     }
   }
 
@@ -28,7 +28,7 @@ export class NotificationsListener {
     try {
       await this.notifications.notifyAgreementFunded(data);
     } catch (err) {
-      this.logger.error("handleAgreementFunded failed", err);
+      this.logger.error('handleAgreementFunded failed', err);
     }
   }
 
@@ -37,7 +37,7 @@ export class NotificationsListener {
     try {
       await this.notifications.notifyAgreementCompleted(data);
     } catch (err) {
-      this.logger.error("handleAgreementCompleted failed", err);
+      this.logger.error('handleAgreementCompleted failed', err);
     }
   }
 }
