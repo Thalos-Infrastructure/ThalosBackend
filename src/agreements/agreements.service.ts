@@ -1,15 +1,11 @@
-import {
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from "@nestjs/common";
-import { EventEmitter2 } from "@nestjs/event-emitter";
-import { SupabaseService } from "../supabase/supabase.service";
-import { CreateAgreementDto } from "./dto/create-agreement.dto";
-import { LinkContractDto } from "./dto/link-contract.dto";
-import { UpdateAgreementStatusDto } from "./dto/update-status.dto";
-import { UpdateMilestoneDto } from "./dto/update-milestone.dto";
-import { AGREEMENT_EVENTS } from "../common/events/agreement-events.constants";
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { SupabaseService } from '../supabase/supabase.service';
+import { CreateAgreementDto } from './dto/create-agreement.dto';
+import { LinkContractDto } from './dto/link-contract.dto';
+import { UpdateAgreementStatusDto } from './dto/update-status.dto';
+import { UpdateMilestoneDto } from './dto/update-milestone.dto';
+import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
 
 @Injectable()
 export class AgreementsService {
@@ -21,9 +17,9 @@ export class AgreementsService {
   private async walletForUserId(userId: string): Promise<string | null> {
     const { data, error } = await this.supabase
       .getClient()
-      .from("auth_users")
-      .select("wallet_public_key")
-      .eq("id", userId)
+      .from('auth_users')
+      .select('wallet_public_key')
+      .eq('id', userId)
       .maybeSingle();
     if (error || !data?.wallet_public_key) return null;
     return data.wallet_public_key as string;
@@ -33,12 +29,12 @@ export class AgreementsService {
     const w = await this.walletForUserId(userId);
     if (!w) {
       throw new ForbiddenException(
-        "No hay wallet en auth_users para este usuario (wallet_public_key vacío o usuario no encontrado). Revisá Supabase y que Nest use el mismo proyecto (SUPABASE_URL).",
+        'No hay wallet en auth_users para este usuario (wallet_public_key vacío o usuario no encontrado). Revisá Supabase y que Nest use el mismo proyecto (SUPABASE_URL).',
       );
     }
     if (w !== actorWallet) {
       throw new ForbiddenException(
-        "created_by debe ser exactamente auth_users.wallet_public_key del usuario del JWT (misma cadena G...).",
+        'created_by debe ser exactamente auth_users.wallet_public_key del usuario del JWT (misma cadena G...).',
       );
     }
   }
@@ -47,41 +43,38 @@ export class AgreementsService {
   private async profileIdByWallet(wallet: string): Promise<string | null> {
     const { data, error } = await this.supabase
       .getClient()
-      .from("profiles")
-      .select("id")
-      .eq("wallet_address", wallet)
+      .from('profiles')
+      .select('id')
+      .eq('wallet_address', wallet)
       .maybeSingle();
     if (error || !data?.id) return null;
     return data.id as string;
   }
 
-  private async assertCanAccessAgreement(
-    userId: string,
-    agreementId: string,
-  ): Promise<void> {
+  private async assertCanAccessAgreement(userId: string, agreementId: string): Promise<void> {
     const wallet = await this.walletForUserId(userId);
-    if (!wallet) throw new ForbiddenException("No wallet on profile");
+    if (!wallet) throw new ForbiddenException('No wallet on profile');
 
     const { data: agreement, error: aErr } = await this.supabase
       .getClient()
-      .from("agreements")
-      .select("id, created_by")
-      .eq("id", agreementId)
+      .from('agreements')
+      .select('id, created_by')
+      .eq('id', agreementId)
       .maybeSingle();
-    if (aErr || !agreement) throw new NotFoundException("Agreement not found");
+    if (aErr || !agreement) throw new NotFoundException('Agreement not found');
 
     const createdBy = (agreement as { created_by: string }).created_by;
     if (createdBy === wallet || createdBy === userId) return;
 
     const { data: parts } = await this.supabase
       .getClient()
-      .from("agreement_participants")
-      .select("wallet_address")
-      .eq("agreement_id", agreementId)
-      .eq("wallet_address", wallet)
+      .from('agreement_participants')
+      .select('wallet_address')
+      .eq('agreement_id', agreementId)
+      .eq('wallet_address', wallet)
       .limit(1);
     if (!parts?.length) {
-      throw new ForbiddenException("Not a participant of this agreement");
+      throw new ForbiddenException('Not a participant of this agreement');
     }
   }
 
@@ -95,9 +88,9 @@ export class AgreementsService {
       title: dto.title,
       description: dto.description ?? null,
       amount: dto.amount,
-      asset: dto.asset ?? "USDC",
-      status: "pending",
-      agreement_type: dto.agreement_type ?? "single",
+      asset: dto.asset ?? 'USDC',
+      status: 'pending',
+      agreement_type: dto.agreement_type ?? 'single',
       milestones: dto.milestones ?? [],
       metadata: dto.metadata ?? {},
       created_by: dto.created_by,
@@ -108,7 +101,7 @@ export class AgreementsService {
 
     const { data: agreement, error: agreementError } = await this.supabase
       .getClient()
-      .from("agreements")
+      .from('agreements')
       .insert(agreementRow)
       .select()
       .single();
@@ -132,61 +125,53 @@ export class AgreementsService {
 
     const { error: participantsError } = await this.supabase
       .getClient()
-      .from("agreement_participants")
+      .from('agreement_participants')
       .insert(participants);
 
     if (participantsError) {
-      console.error("agreement_participants insert:", participantsError);
+      console.error('agreement_participants insert:', participantsError);
     }
 
-    await this.logActivity(agreement.id, dto.created_by, "created", {
+    await this.logActivity(agreement.id, dto.created_by, 'created', {
       title: dto.title,
       amount: dto.amount,
     });
 
     this.eventEmitter.emit(AGREEMENT_EVENTS.CREATED, {
-      agreementId:        agreement.id,
-      title:              dto.title,
-      description:        dto.description,
-      amount:             dto.amount,
-      asset:              dto.asset ?? "USDC",
-      createdByWallet:    dto.created_by,
+      agreementId: agreement.id,
+      title: dto.title,
+      description: dto.description,
+      amount: dto.amount,
+      asset: dto.asset ?? 'USDC',
+      createdByWallet: dto.created_by,
       participantWallets: dto.participants.map((p) => p.wallet_address),
     });
 
     return { agreement, error: null };
   }
 
-  async linkContract(
-    userId: string,
-    agreementId: string,
-    dto: LinkContractDto,
-  ) {
+  async linkContract(userId: string, agreementId: string, dto: LinkContractDto) {
     await this.assertCanAccessAgreement(userId, agreementId);
     await this.assertActorWallet(userId, dto.actor_wallet);
 
     const { error } = await this.supabase
       .getClient()
-      .from("agreements")
+      .from('agreements')
       .update({
         contract_id: dto.contract_id,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", agreementId);
+      .eq('id', agreementId);
 
     if (error) return { success: false, error: error.message };
 
-    await this.logActivity(agreementId, dto.actor_wallet, "contract_linked", {
+    await this.logActivity(agreementId, dto.actor_wallet, 'contract_linked', {
       contract_id: dto.contract_id,
     });
     return { success: true, error: null };
   }
 
-  async updateStatus(
-    userId: string,
-    agreementId: string,
-    dto: UpdateAgreementStatusDto,
-  ) {
+  async updateStatus(userId: string, agreementId: string, dto: UpdateAgreementStatusDto) {
     await this.assertCanAccessAgreement(userId, agreementId);
     await this.assertActorWallet(userId, dto.actor_wallet);
 
@@ -194,56 +179,53 @@ export class AgreementsService {
       status: dto.status,
       updated_at: new Date().toISOString(),
     };
-    if (dto.status === "funded") {
+    if (dto.status === 'funded') {
       updates.funded_at = new Date().toISOString();
-    } else if (dto.status === "completed" || dto.status === "resolved") {
+    } else if (dto.status === 'completed' || dto.status === 'resolved') {
       updates.completed_at = new Date().toISOString();
     }
 
     const { error } = await this.supabase
       .getClient()
-      .from("agreements")
+      .from('agreements')
       .update(updates)
-      .eq("id", agreementId);
+      .eq('id', agreementId);
 
     if (error) return { success: false, error: error.message };
 
-    await this.logActivity(
-      agreementId,
-      dto.actor_wallet,
-      `status_changed_to_${dto.status}`,
-      { status: dto.status },
-    );
+    await this.logActivity(agreementId, dto.actor_wallet, `status_changed_to_${dto.status}`, {
+      status: dto.status,
+    });
 
-    if (dto.status === "funded") {
+    if (dto.status === 'funded') {
       const { data: row } = await this.supabase
         .getClient()
-        .from("agreements")
-        .select("title, amount, asset")
-        .eq("id", agreementId)
+        .from('agreements')
+        .select('title, amount, asset')
+        .eq('id', agreementId)
         .single();
       if (row) {
         this.eventEmitter.emit(AGREEMENT_EVENTS.FUNDED, {
           agreementId,
-          title:          row.title,
-          amount:         row.amount,
-          asset:          row.asset ?? "USDC",
+          title: row.title,
+          amount: row.amount,
+          asset: row.asset ?? 'USDC',
           fundedByWallet: dto.actor_wallet,
         });
       }
-    } else if (dto.status === "completed" || dto.status === "resolved") {
+    } else if (dto.status === 'completed' || dto.status === 'resolved') {
       const { data: row } = await this.supabase
         .getClient()
-        .from("agreements")
-        .select("title, amount, asset")
-        .eq("id", agreementId)
+        .from('agreements')
+        .select('title, amount, asset')
+        .eq('id', agreementId)
         .single();
       if (row) {
         this.eventEmitter.emit(AGREEMENT_EVENTS.COMPLETED, {
           agreementId,
-          title:       row.title,
+          title: row.title,
           totalAmount: row.amount,
-          asset:       row.asset ?? "USDC",
+          asset: row.asset ?? 'USDC',
           completedAt: new Date().toISOString(),
         });
       }
@@ -252,59 +234,65 @@ export class AgreementsService {
     return { success: true, error: null };
   }
 
-  async updateMilestone(
-    userId: string,
-    agreementId: string,
-    dto: UpdateMilestoneDto,
-  ) {
+  async updateMilestone(userId: string, agreementId: string, dto: UpdateMilestoneDto) {
     await this.assertCanAccessAgreement(userId, agreementId);
     await this.assertActorWallet(userId, dto.actor_wallet);
 
     const { data: agreement, error: fetchError } = await this.supabase
       .getClient()
-      .from("agreements")
-      .select("milestones")
-      .eq("id", agreementId)
+      .from('agreements')
+      .select('milestones')
+      .eq('id', agreementId)
       .single();
 
     if (fetchError || !agreement) {
-      return { success: false, error: fetchError?.message || "Not found" };
+      return { success: false, error: fetchError?.message || 'Not found' };
     }
 
     const milestones = agreement.milestones as Array<{
       description: string;
       amount: string;
       status: string;
+      evidence_description?: string;
+      evidence_urls?: string[];
+      evidence_submitted_at?: string;
     }>;
-    if (
-      dto.milestone_index < 0 ||
-      dto.milestone_index >= milestones.length
-    ) {
-      return { success: false, error: "Invalid milestone index" };
+    if (dto.milestone_index < 0 || dto.milestone_index >= milestones.length) {
+      return { success: false, error: 'Invalid milestone index' };
     }
 
-    milestones[dto.milestone_index].status = dto.status;
+    const milestone = milestones[dto.milestone_index];
+    const previousStatus = milestone.status;
+    const emitsEvidence =
+      dto.evidence_description !== undefined || dto.evidence_urls !== undefined;
+
+    milestone.status = dto.status;
+
+    if (dto.evidence_description !== undefined) {
+      milestone.evidence_description = dto.evidence_description;
+    }
+    if (dto.evidence_urls !== undefined) {
+      milestone.evidence_urls = dto.evidence_urls;
+    }
+    if (emitsEvidence) {
+      milestone.evidence_submitted_at = new Date().toISOString();
+    }
 
     const { error: updateError } = await this.supabase
       .getClient()
-      .from("agreements")
+      .from('agreements')
       .update({
         milestones,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", agreementId);
+      .eq('id', agreementId);
 
     if (updateError) return { success: false, error: updateError.message };
 
-    await this.logActivity(
-      agreementId,
-      dto.actor_wallet,
-      `milestone_${dto.status}`,
-      {
-        milestone_index: dto.milestone_index,
-        milestone_description: milestones[dto.milestone_index].description,
-      },
-    );
+    await this.logActivity(agreementId, dto.actor_wallet, `milestone_${dto.status}`, {
+      milestone_index: dto.milestone_index,
+      milestone_description: milestones[dto.milestone_index].description,
+    });
     return { success: true, error: null };
   }
 
@@ -313,9 +301,9 @@ export class AgreementsService {
 
     const { data: participations, error: partError } = await this.supabase
       .getClient()
-      .from("agreement_participants")
-      .select("agreement_id")
-      .eq("wallet_address", wallet);
+      .from('agreement_participants')
+      .select('agreement_id')
+      .eq('wallet_address', wallet);
 
     if (partError) {
       return { agreements: [], error: partError.message };
@@ -323,9 +311,9 @@ export class AgreementsService {
 
     const { data: createdRows, error: createdError } = await this.supabase
       .getClient()
-      .from("agreements")
-      .select("id")
-      .eq("created_by", wallet);
+      .from('agreements')
+      .select('id')
+      .eq('created_by', wallet);
 
     if (createdError) {
       return { agreements: [], error: createdError.message };
@@ -346,10 +334,10 @@ export class AgreementsService {
     const ids = [...idSet];
     const { data: agreements, error: agError } = await this.supabase
       .getClient()
-      .from("agreements")
-      .select("*")
-      .in("id", ids)
-      .order("created_at", { ascending: false });
+      .from('agreements')
+      .select('*')
+      .in('id', ids)
+      .order('created_at', { ascending: false });
 
     if (agError) return { agreements: [], error: agError.message };
     return { agreements: agreements ?? [], error: null };
@@ -360,9 +348,9 @@ export class AgreementsService {
 
     const { data: agreement, error: agError } = await this.supabase
       .getClient()
-      .from("agreements")
-      .select("*")
-      .eq("id", agreementId)
+      .from('agreements')
+      .select('*')
+      .eq('id', agreementId)
       .single();
 
     if (agError) {
@@ -371,9 +359,9 @@ export class AgreementsService {
 
     const { data: participants, error: partError } = await this.supabase
       .getClient()
-      .from("agreement_participants")
-      .select("*")
-      .eq("agreement_id", agreementId);
+      .from('agreement_participants')
+      .select('*')
+      .eq('agreement_id', agreementId);
 
     if (partError) {
       return { agreement, participants: [], error: partError.message };
@@ -384,17 +372,17 @@ export class AgreementsService {
   async getByContractId(userId: string, contractId: string) {
     const { data, error } = await this.supabase
       .getClient()
-      .from("agreements")
-      .select("*")
-      .eq("contract_id", contractId)
+      .from('agreements')
+      .select('*')
+      .eq('contract_id', contractId)
       .maybeSingle();
 
     if (error) {
-      if (error.code === "PGRST116") {
+      if (error.code === 'PGRST116') {
         return {
           agreement: null,
           error:
-            "Ningún acuerdo tiene contract_id igual a este valor (revisá Supabase o hacé PATCH link-contract antes).",
+            'Ningún acuerdo tiene contract_id igual a este valor (revisá Supabase o hacé PATCH link-contract antes).',
         };
       }
       return { agreement: null, error: error.message };
@@ -403,7 +391,7 @@ export class AgreementsService {
       return {
         agreement: null,
         error:
-          "Ningún acuerdo tiene contract_id igual a este valor (copiá el texto exacto de la columna contract_id).",
+          'Ningún acuerdo tiene contract_id igual a este valor (copiá el texto exacto de la columna contract_id).',
       };
     }
 
@@ -416,10 +404,10 @@ export class AgreementsService {
 
     const { data, error } = await this.supabase
       .getClient()
-      .from("agreement_activity")
-      .select("*")
-      .eq("agreement_id", agreementId)
-      .order("created_at", { ascending: false });
+      .from('agreement_activity')
+      .select('*')
+      .eq('agreement_id', agreementId)
+      .order('created_at', { ascending: false });
 
     if (error) return { activities: [], error: error.message };
     return { activities: data ?? [], error: null };
@@ -432,14 +420,14 @@ export class AgreementsService {
     details: Record<string, unknown> = {},
   ) {
     try {
-      await this.supabase.getClient().from("agreement_activity").insert({
+      await this.supabase.getClient().from('agreement_activity').insert({
         agreement_id: agreementId,
         actor_wallet: actorWallet,
         action,
         details,
       });
     } catch (e) {
-      console.error("logAgreementActivity", e);
+      console.error('logAgreementActivity', e);
     }
   }
 }

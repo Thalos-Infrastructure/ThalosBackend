@@ -1,4 +1,4 @@
-import { Type } from "class-transformer";
+import { Type } from 'class-transformer';
 import {
   IsArray,
   IsIn,
@@ -7,7 +7,7 @@ import {
   IsString,
   IsUUID,
   ValidateNested,
-} from "class-validator";
+} from 'class-validator';
 
 class MilestoneDto {
   @IsString()
@@ -16,8 +16,8 @@ class MilestoneDto {
   @IsString()
   amount: string;
 
-  @IsIn(["pending", "approved", "released"])
-  status: "pending" | "approved" | "released";
+  @IsIn(['pending', 'approved', 'released'])
+  status: 'pending' | 'approved' | 'released';
 }
 
 class ParticipantDto {

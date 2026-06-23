@@ -1,13 +1,13 @@
-import { Injectable } from "@nestjs/common";
-import { SupabaseService } from "../supabase/supabase.service";
-import { SearchUsersDto } from "./dto/search-users.dto";
+import { Injectable } from '@nestjs/common';
+import { SupabaseService } from '../supabase/supabase.service';
+import { SearchUsersDto } from './dto/search-users.dto';
 
 @Injectable()
 export class UsersService {
   constructor(private readonly supabase: SupabaseService) {}
 
   async search(userId: string, dto: SearchUsersDto) {
-    const sanitized = dto.q.replace(/[%_]/g, "");
+    const sanitized = dto.q.replace(/[%_]/g, '');
     if (!sanitized) {
       return { users: [], page: dto.page ?? 1, limit: dto.limit ?? 10, error: null };
     }
@@ -17,24 +17,23 @@ export class UsersService {
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    const isUUID =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        dto.q.trim(),
-      );
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      dto.q.trim(),
+    );
 
     const excludeId = dto.exclude_profile_id ?? userId;
 
     let query = this.supabase
       .getClient()
-      .from("profiles")
-      .select("id, display_name, email, wallet_address", { count: "exact" });
+      .from('profiles')
+      .select('id, display_name, email, wallet_address', { count: 'exact' });
 
     if (excludeId) {
-      query = query.neq("id", excludeId);
+      query = query.neq('id', excludeId);
     }
 
     if (isUUID) {
-      query = query.eq("id", dto.q.trim()).limit(1);
+      query = query.eq('id', dto.q.trim()).limit(1);
     } else {
       query = query
         .or(
@@ -51,9 +50,9 @@ export class UsersService {
 
     const users = (data ?? []).map((u) => ({
       id: u.id,
-      name: u.display_name || "Unknown",
-      email: u.email || "",
-      wallet_address: u.wallet_address || "",
+      name: u.display_name || 'Unknown',
+      email: u.email || '',
+      wallet_address: u.wallet_address || '',
     }));
 
     return {

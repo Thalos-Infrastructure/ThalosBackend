@@ -31,6 +31,9 @@ Copy [`.env.example`](.env.example) to `.env.local` and fill in real values. `.e
 | `THALOS_INTERNAL_SECRET` | Yes | Shared secret for the internal Next.js → Nest relay (`x-thalos-internal-secret`). Must match the frontend's value. |
 | `TRUSTLESSWORK_API_URL` | For escrow ops | Base URL of the Trustless Work API. |
 | `TRUSTLESSWORK_API_KEY` | For escrow ops | Trustless Work API key, injected server-side by the relay. **Never expose to the browser.** |
+| `PLATFORM_ADDRESS` | No | Platform address used when creating escrows. Has a testnet default. |
+| `DISPUTE_RESOLVER` | No | Dispute resolver address used when creating escrows. Has a testnet default. |
+| `TRUSTLINE_USDC_ADDRESS` | No | USDC trustline address used when creating escrows. Has a testnet default. |
 | `RESEND_API_KEY` | For emails | Resend API key. If unset, email notifications are disabled (logged, non-fatal). |
 | `PORT` | No | HTTP port. Defaults to **3001**. |
 | `THALOS_CORS_ORIGIN` | No | Comma-separated list of allowed CORS origins. Defaults to allowing all. |
@@ -51,7 +54,7 @@ The server listens on port **3001** by default with a global `v1` prefix.
 ### Scripts
 
 | Command | Description |
-|---|---|
+|---|---|---|
 | `pnpm run start:dev` | Start in watch mode (development) |
 | `pnpm run start` | Start without watch |
 | `pnpm run build` | Compile to `dist/` |
@@ -116,6 +119,8 @@ The browser must call the Next.js frontend (`/api/...`), which forwards to this 
 | `POST /v1/internal/trustless/relay` | Internal secret | Same relay, for the Next.js server only |
 | `GET /v1/escrows/by-signer/:address` | Bearer JWT | Escrows where the address is a signer |
 | `GET /v1/escrows/by-role` | Bearer JWT | Escrows filtered by role/status/type |
+| `POST /v1/escrows/{create,fund,approve-milestone,change-milestone-status,release,dispute}` | Bearer JWT | Escrow writes; return an `unsignedTransaction` to sign client-side. Enforce that the signer matches the JWT wallet |
+| `POST /v1/escrows/send-transaction` | Bearer JWT | Submit the already-signed XDR to the network |
 | `GET\|POST\|PATCH /v1/agreements/*` | Bearer JWT | Agreement CRUD, milestones, status, activity |
 | `GET\|POST\|PATCH /v1/disputes/*` | Bearer JWT | Dispute lifecycle |
 | `GET /v1/users/search` | Bearer JWT | Profile search |
@@ -129,6 +134,17 @@ The Trustless Work relay only allows paths under `deployer/`, `escrow/`, and `he
 ## Database & migrations
 
 SQL migrations live under [`scripts/`](scripts). Apply them to the Supabase project before running the API.
+
+## Notifications (EventEmitter2)
+
+Transactional email notifications are wired through in-process **EventEmitter2** events — no direct coupling between modules.
+
+- `DisputesService.openDispute()` emits `dispute.opened` → `NotificationsService.handleDisputeOpened()` looks up agreement title + opener name and sends email
+- `DisputesService.resolveDispute()` emits `dispute.resolved` → `NotificationsService.handleDisputeResolved()` calculates refund/release amounts and sends email
+
+Event name constants live in `src/common/constants/notification-events.ts` (single source of truth, no string literals).
+
+If `RESEND_API_KEY` is not set, emails are skipped with a warning log — the originating action is never blocked.
 
 ## Docs
 

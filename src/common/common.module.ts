@@ -1,5 +1,5 @@
-import { Module } from "@nestjs/common";
-import { ApiClientModule } from "./api/api-client.module";
+import { Module } from '@nestjs/common';
+import { ApiClientModule } from './api/api-client.module';
 
 @Module({
   imports: [ApiClientModule],
