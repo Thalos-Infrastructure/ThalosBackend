@@ -6,8 +6,8 @@ import {
   DisputeOpenedData,
   DisputeResolvedData,
   AgreementCompletedData,
-} from "../types/notification-data.types";
-import { baseTemplate, formatWallet, formatAmount } from "./base.template";
+} from '../types/notification-data.types';
+import { baseTemplate, formatWallet, formatAmount } from './base.template';
 
 export function agreementCreatedTemplate(data: AgreementCreatedData): string {
   const content = `
@@ -18,7 +18,7 @@ export function agreementCreatedTemplate(data: AgreementCreatedData): string {
 
     <div style="background: #1a2540; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
       <h3 style="color: #FFFFFF; margin: 0 0 12px; font-size: 18px;">${data.title}</h3>
-      ${data.description ? `<p style="color: rgba(255,255,255,0.6); margin: 0 0 16px;">${data.description}</p>` : ""}
+      ${data.description ? `<p style="color: rgba(255,255,255,0.6); margin: 0 0 16px;">${data.description}</p>` : ''}
 
       <table style="width: 100%; border-collapse: collapse;">
         <tr>
@@ -68,7 +68,9 @@ export function agreementFundedTemplate(data: AgreementFundedData): string {
           <td style="padding: 8px 0; color: rgba(255,255,255,0.55);">Funded by:</td>
           <td style="padding: 8px 0; color: #FFFFFF;">${data.fundedByName || formatWallet(data.fundedByWallet)}</td>
         </tr>
-        ${data.transactionSignature ? `
+        ${
+          data.transactionSignature
+            ? `
         <tr>
           <td style="padding: 8px 0; color: rgba(255,255,255,0.55);">Transaction:</td>
           <td style="padding: 8px 0;">
@@ -78,7 +80,9 @@ export function agreementFundedTemplate(data: AgreementFundedData): string {
             </a>
           </td>
         </tr>
-        ` : ""}
+        `
+            : ''
+        }
       </table>
     </div>
 
@@ -114,12 +118,16 @@ export function evidenceSubmittedTemplate(data: EvidenceSubmittedData): string {
           <td style="padding: 8px 0; color: rgba(255,255,255,0.55);">Submitted by:</td>
           <td style="padding: 8px 0; color: #FFFFFF;">${data.submittedByName || formatWallet(data.submittedByWallet)}</td>
         </tr>
-        ${data.evidenceDescription ? `
+        ${
+          data.evidenceDescription
+            ? `
         <tr>
           <td style="padding: 8px 0; color: rgba(255,255,255,0.55);">Description:</td>
           <td style="padding: 8px 0; color: #FFFFFF;">${data.evidenceDescription}</td>
         </tr>
-        ` : ""}
+        `
+            : ''
+        }
       </table>
     </div>
 
@@ -190,12 +198,16 @@ export function disputeOpenedTemplate(data: DisputeOpenedData): string {
           <td style="padding: 8px 0; color: rgba(255,255,255,0.55); width: 120px;">Opened by:</td>
           <td style="padding: 8px 0; color: #FFFFFF;">${data.openedByName || formatWallet(data.openedByWallet)}</td>
         </tr>
-        ${data.milestoneDescription ? `
+        ${
+          data.milestoneDescription
+            ? `
         <tr>
           <td style="padding: 8px 0; color: rgba(255,255,255,0.55);">Milestone:</td>
           <td style="padding: 8px 0; color: #FFFFFF;">#${(data.milestoneIndex ?? 0) + 1} - ${data.milestoneDescription}</td>
         </tr>
-        ` : ""}
+        `
+            : ''
+        }
         <tr>
           <td style="padding: 8px 0; color: rgba(255,255,255,0.55);">Reason:</td>
           <td style="padding: 8px 0; color: #ef4444; font-weight: 500;">${data.disputeReason}</td>
@@ -235,18 +247,26 @@ export function disputeResolvedTemplate(data: DisputeResolvedData): string {
           <td style="padding: 8px 0; color: rgba(255,255,255,0.55);">Resolved by:</td>
           <td style="padding: 8px 0; color: #FFFFFF;">${data.resolvedByName || formatWallet(data.resolvedByWallet)}</td>
         </tr>
-        ${data.releaseAmount ? `
+        ${
+          data.releaseAmount
+            ? `
         <tr>
           <td style="padding: 8px 0; color: rgba(255,255,255,0.55);">Released:</td>
-          <td style="padding: 8px 0; color: #F0B400; font-weight: 600;">${formatAmount(data.releaseAmount, data.asset || "USDC")}</td>
+          <td style="padding: 8px 0; color: #F0B400; font-weight: 600;">${formatAmount(data.releaseAmount, data.asset || 'USDC')}</td>
         </tr>
-        ` : ""}
-        ${data.refundAmount ? `
+        `
+            : ''
+        }
+        ${
+          data.refundAmount
+            ? `
         <tr>
           <td style="padding: 8px 0; color: rgba(255,255,255,0.55);">Refunded:</td>
-          <td style="padding: 8px 0; color: #F0B400; font-weight: 600;">${formatAmount(data.refundAmount, data.asset || "USDC")}</td>
+          <td style="padding: 8px 0; color: #F0B400; font-weight: 600;">${formatAmount(data.refundAmount, data.asset || 'USDC')}</td>
         </tr>
-        ` : ""}
+        `
+            : ''
+        }
       </table>
     </div>
 
@@ -260,10 +280,10 @@ export function disputeResolvedTemplate(data: DisputeResolvedData): string {
 }
 
 export function agreementCompletedTemplate(data: AgreementCompletedData): string {
-  const completedDate = new Date(data.completedAt).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
+  const completedDate = new Date(data.completedAt).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
   });
 
   const content = `

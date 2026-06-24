@@ -8,23 +8,17 @@ import {
   Post,
   Query,
   UseGuards,
-} from "@nestjs/common";
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiQuery,
-  ApiResponse,
-  ApiTags,
-} from "@nestjs/swagger";
-import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import { CurrentUser, AuthUserCtx } from "../auth/current-user.decorator";
-import { WalletsService } from "./wallets.service";
-import { LinkWalletDto, UpdateWalletDto } from "./dto/wallets.dto";
-import { VerificationChallengeQueryDto } from "./dto/verification-challenge.dto";
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CurrentUser, AuthUserCtx } from '../auth/current-user.decorator';
+import { WalletsService } from './wallets.service';
+import { LinkWalletDto, UpdateWalletDto } from './dto/wallets.dto';
+import { VerificationChallengeQueryDto } from './dto/verification-challenge.dto';
 
-@ApiTags("wallets")
-@ApiBearerAuth("bearer")
-@Controller("wallets")
+@ApiTags('wallets')
+@ApiBearerAuth('bearer')
+@Controller('wallets')
 @UseGuards(JwtAuthGuard)
 export class WalletsController {
   constructor(private readonly walletsService: WalletsService) {}
@@ -42,7 +36,7 @@ export class WalletsController {
    * GET /wallets/with-balances
    * Get all wallets with their current balances
    */
-  @Get("with-balances")
+  @Get('with-balances')
   async getMyWalletsWithBalances(@CurrentUser() user: AuthUserCtx) {
     return this.walletsService.getUserWalletsWithBalances(user.userId);
   }
@@ -51,7 +45,7 @@ export class WalletsController {
    * GET /wallets/agreements
    * Get all agreements grouped by wallet
    */
-  @Get("agreements")
+  @Get('agreements')
   async getAgreementsByWallet(@CurrentUser() user: AuthUserCtx) {
     return this.walletsService.getAgreementsByWallet(user.userId);
   }
@@ -60,7 +54,7 @@ export class WalletsController {
    * GET /wallets/primary
    * Get the primary wallet for the user
    */
-  @Get("primary")
+  @Get('primary')
   async getPrimaryWallet(@CurrentUser() user: AuthUserCtx) {
     const wallet = await this.walletsService.getPrimaryWallet(user.userId);
     return { wallet };
@@ -71,34 +65,31 @@ export class WalletsController {
    * Generate a stateless wallet ownership verification challenge
    */
   @ApiOperation({
-    summary: "Generate a stateless wallet ownership verification challenge",
+    summary: 'Generate a stateless wallet ownership verification challenge',
   })
   @ApiQuery({
-    name: "address",
+    name: 'address',
     required: true,
-    description: "Stellar public key (G..., 56 chars)",
-    example: "GA7QYNF7SOWQ3GLR2BGMZEHHHVSH3VK4UFR2QPYDQGPHK3WSALDQXJZN",
+    description: 'Stellar public key (G..., 56 chars)',
+    example: 'GA7QYNF7SOWQ3GLR2BGMZEHHHVSH3VK4UFR2QPYDQGPHK3WSALDQXJZN',
   })
-  @ApiResponse({ status: 200, description: "Challenge generated" })
-  @ApiResponse({ status: 400, description: "Invalid Stellar address" })
-  @ApiResponse({ status: 401, description: "Unauthorized" })
-  @Get("verification-challenge")
+  @ApiResponse({ status: 200, description: 'Challenge generated' })
+  @ApiResponse({ status: 400, description: 'Invalid Stellar address' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @Get('verification-challenge')
   getVerificationChallenge(
     @CurrentUser() user: AuthUserCtx,
     @Query() query: VerificationChallengeQueryDto,
   ) {
-    return this.walletsService.generateVerificationChallenge(
-      user.userId,
-      query.address,
-    );
+    return this.walletsService.generateVerificationChallenge(user.userId, query.address);
   }
 
   /**
    * GET /wallets/:address/balance
    * Get balance for a specific wallet address
    */
-  @Get(":address/balance")
-  async getWalletBalance(@Param("address") address: string) {
+  @Get(':address/balance')
+  async getWalletBalance(@Param('address') address: string) {
     const balance = await this.walletsService.getWalletBalance(address);
     return { balance };
   }
@@ -108,10 +99,7 @@ export class WalletsController {
    * Link a new wallet to the user account
    */
   @Post()
-  async linkWallet(
-    @CurrentUser() user: AuthUserCtx,
-    @Body() dto: LinkWalletDto,
-  ) {
+  async linkWallet(@CurrentUser() user: AuthUserCtx, @Body() dto: LinkWalletDto) {
     return this.walletsService.linkWallet(user.userId, dto);
   }
 
@@ -119,10 +107,10 @@ export class WalletsController {
    * PATCH /wallets/:id
    * Update a wallet (label, primary status)
    */
-  @Patch(":id")
+  @Patch(':id')
   async updateWallet(
     @CurrentUser() user: AuthUserCtx,
-    @Param("id") walletId: string,
+    @Param('id') walletId: string,
     @Body() dto: UpdateWalletDto,
   ) {
     return this.walletsService.updateWallet(user.userId, walletId, dto);
@@ -132,11 +120,8 @@ export class WalletsController {
    * DELETE /wallets/:id
    * Unlink a wallet from the user account
    */
-  @Delete(":id")
-  async unlinkWallet(
-    @CurrentUser() user: AuthUserCtx,
-    @Param("id") walletId: string,
-  ) {
+  @Delete(':id')
+  async unlinkWallet(@CurrentUser() user: AuthUserCtx, @Param('id') walletId: string) {
     return this.walletsService.unlinkWallet(user.userId, walletId);
   }
 
@@ -144,15 +129,9 @@ export class WalletsController {
    * GET /wallets/check/:address
    * Check if a wallet belongs to the authenticated user
    */
-  @Get("check/:address")
-  async checkWalletOwnership(
-    @CurrentUser() user: AuthUserCtx,
-    @Param("address") address: string,
-  ) {
-    const belongs = await this.walletsService.walletBelongsToUser(
-      user.userId,
-      address,
-    );
+  @Get('check/:address')
+  async checkWalletOwnership(@CurrentUser() user: AuthUserCtx, @Param('address') address: string) {
+    const belongs = await this.walletsService.walletBelongsToUser(user.userId, address);
     return { belongs };
   }
 }
