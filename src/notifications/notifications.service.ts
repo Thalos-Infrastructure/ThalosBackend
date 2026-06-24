@@ -1,6 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Resend } from 'resend';
+import { AgreementEventName } from '../events/agreement-events';
 import { SupabaseService } from '../supabase/supabase.service';
 import {
   AgreementCreatedData,
@@ -31,7 +33,7 @@ import {
 export class NotificationsService implements OnModuleInit {
   private readonly logger = new Logger(NotificationsService.name);
   private resend: Resend;
-  private readonly fromEmail = 'Thalos <notifications@thalosplatform.xyz>';
+  private fromEmail = 'Thalos <notifications@thalosplatform.xyz>';
 
   constructor(
     private readonly supabase: SupabaseService,
@@ -136,7 +138,7 @@ export class NotificationsService implements OnModuleInit {
     }
   }
 
-  @OnEvent(AgreementEventNames.EvidenceSubmitted)
+  @OnEvent(AgreementEventName.EvidenceSubmitted)
   async handleEvidenceSubmitted(data: EvidenceSubmittedData): Promise<void> {
     try {
       await this.notifyEvidenceSubmitted(data, data.submittedByWallet);
@@ -145,7 +147,7 @@ export class NotificationsService implements OnModuleInit {
     }
   }
 
-  @OnEvent(AgreementEventNames.MilestoneApproved)
+  @OnEvent(AgreementEventName.MilestoneApproved)
   async handleMilestoneApproved(data: MilestoneApprovedData): Promise<void> {
     try {
       await this.notifyMilestoneApproved(data);
