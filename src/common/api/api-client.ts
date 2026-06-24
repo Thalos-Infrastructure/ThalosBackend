@@ -1,4 +1,4 @@
-import { BadRequestException, Logger } from "@nestjs/common";
+import { Logger } from '@nestjs/common';
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -7,7 +7,7 @@ export interface ApiResponse<T> {
 }
 
 export interface ApiRequestConfig {
-  method: "GET" | "POST" | "PATCH" | "DELETE" | "PUT";
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE' | 'PUT';
   url: string;
   headers?: Record<string, string>;
   body?: unknown;
@@ -24,15 +24,10 @@ export class ApiClient {
       const url = this.buildUrl(config.url, config.query);
       const fetchOptions = this.buildFetchOptions(config);
 
-      this.logger.debug(
-        `[${config.method}] ${url} - Making request`,
-      );
+      this.logger.debug(`[${config.method}] ${url} - Making request`);
 
       const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(),
-        config.timeout || this.defaultTimeout,
-      );
+      const timeout = setTimeout(() => controller.abort(), config.timeout || this.defaultTimeout);
 
       try {
         const response = await fetch(url, {
@@ -45,19 +40,14 @@ export class ApiClient {
         const responseData = await this.parseResponse<T>(response);
 
         if (!response.ok) {
-          this.logger.warn(
-            `[${config.method}] ${url} - Error ${response.status}`,
-            responseData,
-          );
+          this.logger.warn(`[${config.method}] ${url} - Error ${response.status}`, responseData);
           return {
             success: false,
             error: this.extractErrorMessage(responseData, response.status),
           };
         }
 
-        this.logger.debug(
-          `[${config.method}] ${url} - Success (${response.status})`,
-        );
+        this.logger.debug(`[${config.method}] ${url} - Success (${response.status})`);
         return {
           success: true,
           data: responseData,
@@ -70,7 +60,7 @@ export class ApiClient {
       const errorMessage = this.extractErrorMessage(error);
       this.logger.error(
         `[${config.method}] ${config.url} - Exception: ${errorMessage}`,
-        error instanceof Error ? error.stack : "",
+        error instanceof Error ? error.stack : '',
       );
       return {
         success: false,
@@ -88,7 +78,7 @@ export class ApiClient {
     },
   ): Promise<ApiResponse<T>> {
     return this.request<T>({
-      method: "GET",
+      method: 'GET',
       url,
       ...options,
     });
@@ -104,7 +94,7 @@ export class ApiClient {
     },
   ): Promise<ApiResponse<T>> {
     return this.request<T>({
-      method: "POST",
+      method: 'POST',
       url,
       body,
       ...options,
@@ -121,7 +111,7 @@ export class ApiClient {
     },
   ): Promise<ApiResponse<T>> {
     return this.request<T>({
-      method: "PATCH",
+      method: 'PATCH',
       url,
       body,
       ...options,
@@ -137,7 +127,7 @@ export class ApiClient {
     },
   ): Promise<ApiResponse<T>> {
     return this.request<T>({
-      method: "DELETE",
+      method: 'DELETE',
       url,
       ...options,
     });
@@ -153,24 +143,21 @@ export class ApiClient {
     },
   ): Promise<ApiResponse<T>> {
     return this.request<T>({
-      method: "PUT",
+      method: 'PUT',
       url,
       body,
       ...options,
     });
   }
 
-  private buildUrl(
-    url: string,
-    query?: Record<string, string | number | boolean>,
-  ): string {
+  private buildUrl(url: string, query?: Record<string, string | number | boolean>): string {
     if (!query || Object.keys(query).length === 0) {
       return url;
     }
 
     const urlObj = new URL(url);
     Object.entries(query).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== "") {
+      if (value !== undefined && value !== null && value !== '') {
         urlObj.searchParams.set(key, String(value));
       }
     });
@@ -182,13 +169,13 @@ export class ApiClient {
     const options: RequestInit = {
       method: config.method,
       headers: {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
         ...config.headers,
       },
     };
 
     // Only include body for methods that support it
-    if (config.body && ["POST", "PATCH", "PUT"].includes(config.method)) {
+    if (config.body && ['POST', 'PATCH', 'PUT'].includes(config.method)) {
       options.body = JSON.stringify(config.body);
     }
 
@@ -196,9 +183,9 @@ export class ApiClient {
   }
 
   private async parseResponse<T>(response: Response): Promise<T> {
-    const contentType = response.headers.get("content-type");
+    const contentType = response.headers.get('content-type');
 
-    if (contentType?.includes("application/json")) {
+    if (contentType?.includes('application/json')) {
       return (await response.json()) as T;
     }
 
@@ -212,17 +199,17 @@ export class ApiClient {
 
   private extractErrorMessage(error: unknown, status?: number): string {
     if (error instanceof Error) {
-      if (error.name === "AbortError") {
-        return "Request timeout";
+      if (error.name === 'AbortError') {
+        return 'Request timeout';
       }
       return error.message;
     }
 
-    if (typeof error === "object" && error !== null) {
-      if ("message" in error) {
+    if (typeof error === 'object' && error !== null) {
+      if ('message' in error) {
         return String(error.message);
       }
-      if ("error" in error) {
+      if ('error' in error) {
         return String(error.error);
       }
     }
@@ -231,7 +218,7 @@ export class ApiClient {
       return `HTTP ${status}`;
     }
 
-    return "Unknown error";
+    return 'Unknown error';
   }
 }
 

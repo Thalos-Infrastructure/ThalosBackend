@@ -1,19 +1,13 @@
-import { IsString, IsOptional, IsBoolean, IsIn } from "class-validator";
+import { IsString, IsOptional, IsBoolean, IsIn } from 'class-validator';
 
-export type WalletType =
-  | "custodial"
-  | "freighter"
-  | "lobstr"
-  | "xbull"
-  | "albedo"
-  | "other";
+export type WalletType = 'custodial' | 'freighter' | 'lobstr' | 'xbull' | 'albedo' | 'other';
 
 export class LinkWalletDto {
   @IsString()
   wallet_address: string;
 
   @IsString()
-  @IsIn(["custodial", "freighter", "lobstr", "xbull", "albedo", "other"])
+  @IsIn(['custodial', 'freighter', 'lobstr', 'xbull', 'albedo', 'other'])
   wallet_type: WalletType;
 
   @IsOptional()

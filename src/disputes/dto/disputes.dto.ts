@@ -7,8 +7,7 @@ import {
   IsNumber,
   Min,
   Max,
-} from "class-validator";
-import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+} from 'class-validator';
 
 export class OpenDisputeDto {
   @ApiProperty({

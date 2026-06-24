@@ -1,14 +1,15 @@
+import { createHmac, randomBytes } from 'crypto';
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
-} from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { SupabaseService } from "../supabase/supabase.service";
-import { ApiClient } from "../common/api/api-client";
-import { LinkWalletDto, UpdateWalletDto, WalletType } from "./dto/wallets.dto";
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { SupabaseService } from '../supabase/supabase.service';
+import { ApiClient } from '../common/api/api-client';
+import { LinkWalletDto, UpdateWalletDto, WalletType } from './dto/wallets.dto';
 
 export interface UserWallet {
   id: string;
@@ -48,7 +49,7 @@ export interface WalletAgreementsSummary {
 @Injectable()
 export class WalletsService {
   private readonly horizonUrl: string;
-  private readonly usdcAssetCode = "USDC";
+  private readonly usdcAssetCode = 'USDC';
   private readonly usdcIssuer: string;
 
   constructor(
@@ -56,15 +57,13 @@ export class WalletsService {
     private readonly config: ConfigService,
     private readonly apiClient: ApiClient,
   ) {
-    const network = this.config.get<string>("STELLAR_NETWORK") || "testnet";
+    const network = this.config.get<string>('STELLAR_NETWORK') || 'testnet';
     this.horizonUrl =
-      network === "mainnet"
-        ? "https://horizon.stellar.org"
-        : "https://horizon-testnet.stellar.org";
+      network === 'mainnet' ? 'https://horizon.stellar.org' : 'https://horizon-testnet.stellar.org';
     this.usdcIssuer =
-      network === "mainnet"
-        ? "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN" // Circle USDC mainnet
-        : "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"; // Testnet USDC
+      network === 'mainnet'
+        ? 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN' // Circle USDC mainnet
+        : 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'; // Testnet USDC
   }
 
   /**
@@ -76,11 +75,11 @@ export class WalletsService {
   }> {
     const { data, error } = await this.supabase
       .getClient()
-      .from("user_wallets")
-      .select("*")
-      .eq("user_id", userId)
-      .order("is_primary", { ascending: false })
-      .order("created_at", { ascending: true });
+      .from('user_wallets')
+      .select('*')
+      .eq('user_id', userId)
+      .order('is_primary', { ascending: false })
+      .order('created_at', { ascending: true });
 
     if (error) {
       return { wallets: [], error: error.message };
@@ -102,9 +101,7 @@ export class WalletsService {
     const walletsWithBalances = await Promise.all(
       wallets.map(async (wallet) => {
         const balance = await this.getWalletBalance(wallet.wallet_address);
-        const agreementsCount = await this.getAgreementsCount(
-          wallet.wallet_address,
-        );
+        const agreementsCount = await this.getAgreementsCount(wallet.wallet_address);
         return {
           ...wallet,
           balance,
@@ -119,9 +116,7 @@ export class WalletsService {
   /**
    * Get balance for a specific wallet from Stellar Horizon
    */
-  async getWalletBalance(
-    walletAddress: string,
-  ): Promise<{ xlm: string; usdc: string }> {
+  async getWalletBalance(walletAddress: string): Promise<{ xlm: string; usdc: string }> {
     const response = await this.apiClient.get<{
       balances: Array<{
         asset_type: string;
@@ -133,19 +128,19 @@ export class WalletsService {
 
     if (!response.success) {
       // Account might not exist or not be funded
-      return { xlm: "0", usdc: "0" };
+      return { xlm: '0', usdc: '0' };
     }
 
     const account = response.data;
     if (!account) {
-      return { xlm: "0", usdc: "0" };
+      return { xlm: '0', usdc: '0' };
     }
 
-    let xlmBalance = "0";
-    let usdcBalance = "0";
+    let xlmBalance = '0';
+    let usdcBalance = '0';
 
     for (const balance of account.balances) {
-      if (balance.asset_type === "native") {
+      if (balance.asset_type === 'native') {
         xlmBalance = balance.balance;
       } else if (
         balance.asset_code === this.usdcAssetCode &&
@@ -164,9 +159,9 @@ export class WalletsService {
   private async getAgreementsCount(walletAddress: string): Promise<number> {
     const { count, error } = await this.supabase
       .getClient()
-      .from("agreement_participants")
-      .select("*", { count: "exact", head: true })
-      .eq("wallet_address", walletAddress);
+      .from('agreement_participants')
+      .select('*', { count: 'exact', head: true })
+      .eq('wallet_address', walletAddress);
 
     if (error) return 0;
     return count || 0;
@@ -182,31 +177,31 @@ export class WalletsService {
     // Check if wallet is already linked to this user
     const { data: existing } = await this.supabase
       .getClient()
-      .from("user_wallets")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("wallet_address", dto.wallet_address)
+      .from('user_wallets')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('wallet_address', dto.wallet_address)
       .maybeSingle();
 
     if (existing) {
-      throw new ConflictException("Wallet is already linked to your account");
+      throw new ConflictException('Wallet is already linked to your account');
     }
 
     // Check if this is the first wallet (make it primary)
     const { count } = await this.supabase
       .getClient()
-      .from("user_wallets")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", userId);
+      .from('user_wallets')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId);
 
     const isPrimary = count === 0;
 
     // For non-custodial wallets, require verification
-    const isVerified = dto.wallet_type === "custodial";
+    const isVerified = dto.wallet_type === 'custodial';
 
     const { data, error } = await this.supabase
       .getClient()
-      .from("user_wallets")
+      .from('user_wallets')
       .insert({
         user_id: userId,
         wallet_address: dto.wallet_address,
@@ -220,8 +215,8 @@ export class WalletsService {
       .single();
 
     if (error) {
-      if (error.code === "23505") {
-        throw new ConflictException("Wallet is already linked to an account");
+      if (error.code === '23505') {
+        throw new ConflictException('Wallet is already linked to an account');
       }
       return { wallet: null, error: error.message };
     }
@@ -240,24 +235,24 @@ export class WalletsService {
     // First verify ownership
     const { data: existing, error: fetchError } = await this.supabase
       .getClient()
-      .from("user_wallets")
-      .select("*")
-      .eq("id", walletId)
-      .eq("user_id", userId)
+      .from('user_wallets')
+      .select('*')
+      .eq('id', walletId)
+      .eq('user_id', userId)
       .maybeSingle();
 
     if (fetchError || !existing) {
-      throw new NotFoundException("Wallet not found");
+      throw new NotFoundException('Wallet not found');
     }
 
     // If setting as primary, unset other primaries first
     if (dto.is_primary) {
       await this.supabase
         .getClient()
-        .from("user_wallets")
+        .from('user_wallets')
         .update({ is_primary: false, updated_at: new Date().toISOString() })
-        .eq("user_id", userId)
-        .neq("id", walletId);
+        .eq('user_id', userId)
+        .neq('id', walletId);
     }
 
     const updates: Record<string, unknown> = {
@@ -268,9 +263,9 @@ export class WalletsService {
 
     const { data, error } = await this.supabase
       .getClient()
-      .from("user_wallets")
+      .from('user_wallets')
       .update(updates)
-      .eq("id", walletId)
+      .eq('id', walletId)
       .select()
       .single();
 
@@ -291,27 +286,27 @@ export class WalletsService {
     // Can't remove primary wallet if it's the only one
     const { data: wallet, error: fetchError } = await this.supabase
       .getClient()
-      .from("user_wallets")
-      .select("*")
-      .eq("id", walletId)
-      .eq("user_id", userId)
+      .from('user_wallets')
+      .select('*')
+      .eq('id', walletId)
+      .eq('user_id', userId)
       .maybeSingle();
 
     if (fetchError || !wallet) {
-      throw new NotFoundException("Wallet not found");
+      throw new NotFoundException('Wallet not found');
     }
 
     // Can't remove custodial wallet
-    if ((wallet as UserWallet).wallet_type === "custodial") {
-      throw new BadRequestException("Cannot remove custodial wallet");
+    if ((wallet as UserWallet).wallet_type === 'custodial') {
+      throw new BadRequestException('Cannot remove custodial wallet');
     }
 
     const { error } = await this.supabase
       .getClient()
-      .from("user_wallets")
+      .from('user_wallets')
       .delete()
-      .eq("id", walletId)
-      .eq("user_id", userId);
+      .eq('id', walletId)
+      .eq('user_id', userId);
 
     if (error) {
       return { success: false, error: error.message };
@@ -321,18 +316,18 @@ export class WalletsService {
     if ((wallet as UserWallet).is_primary) {
       const { data: remaining } = await this.supabase
         .getClient()
-        .from("user_wallets")
-        .select("id")
-        .eq("user_id", userId)
+        .from('user_wallets')
+        .select('id')
+        .eq('user_id', userId)
         .limit(1)
         .maybeSingle();
 
       if (remaining) {
         await this.supabase
           .getClient()
-          .from("user_wallets")
+          .from('user_wallets')
           .update({ is_primary: true })
-          .eq("id", remaining.id);
+          .eq('id', remaining.id);
       }
     }
 
@@ -354,7 +349,7 @@ export class WalletsService {
         // Get all agreement participations for this wallet
         const { data: participations, error: partError } = await this.supabase
           .getClient()
-          .from("agreement_participants")
+          .from('agreement_participants')
           .select(
             `
             role,
@@ -367,7 +362,7 @@ export class WalletsService {
             )
           `,
           )
-          .eq("wallet_address", wallet.wallet_address);
+          .eq('wallet_address', wallet.wallet_address);
 
         if (partError || !participations) {
           return {
@@ -413,16 +408,13 @@ export class WalletsService {
   /**
    * Check if a wallet belongs to the user
    */
-  async walletBelongsToUser(
-    userId: string,
-    walletAddress: string,
-  ): Promise<boolean> {
+  async walletBelongsToUser(userId: string, walletAddress: string): Promise<boolean> {
     const { data, error } = await this.supabase
       .getClient()
-      .from("user_wallets")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("wallet_address", walletAddress)
+      .from('user_wallets')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('wallet_address', walletAddress)
       .maybeSingle();
 
     return !error && !!data;
@@ -434,13 +426,57 @@ export class WalletsService {
   async getPrimaryWallet(userId: string): Promise<UserWallet | null> {
     const { data, error } = await this.supabase
       .getClient()
-      .from("user_wallets")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("is_primary", true)
+      .from('user_wallets')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_primary', true)
       .maybeSingle();
 
     if (error || !data) return null;
     return data as UserWallet;
+  }
+
+  /**
+   * Generate a stateless wallet ownership verification challenge (SEP-0043 style).
+   * HMAC-SHA256 signed with JWT_SECRET.
+   */
+  generateVerificationChallenge(
+    userId: string,
+    address: string,
+  ): { message: string; expires_at: string } {
+    const TTL_MS = 5 * 60 * 1000;
+    const issuedAt = new Date();
+    const expiresAt = new Date(issuedAt.getTime() + TTL_MS);
+    const nonce = randomBytes(16).toString('hex');
+
+    const payload = {
+      v: 1,
+      sub: userId,
+      addr: address,
+      nonce,
+      exp: Math.floor(expiresAt.getTime() / 1000),
+    };
+    const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+
+    const secret = this.config.get<string>('JWT_SECRET');
+    if (!secret) {
+      throw new InternalServerErrorException('Server misconfiguration');
+    }
+
+    const sig = createHmac('sha256', secret).update(payloadB64).digest('base64url');
+
+    const message =
+      `Thalos Wallet Ownership Proof\n` +
+      `\n` +
+      `I authorize linking this wallet to my Thalos account.\n` +
+      `Account: ${userId}\n` +
+      `Wallet: ${address}\n` +
+      `Nonce: ${nonce}\n` +
+      `Issued At: ${issuedAt.toISOString()}\n` +
+      `Expires At: ${expiresAt.toISOString()}\n` +
+      `\n` +
+      `Proof: ${payloadB64}.${sig}`;
+
+    return { message, expires_at: expiresAt.toISOString() };
   }
 }

@@ -3,28 +3,19 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
-} from "@nestjs/common";
-import { SupabaseService } from "../supabase/supabase.service";
-import { AgreementsService } from "../agreements/agreements.service";
+} from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { SupabaseService } from '../supabase/supabase.service';
+import { AgreementsService } from '../agreements/agreements.service';
+import { DISPUTE_OPENED, DISPUTE_RESOLVED } from '../common/constants/notification-events';
 import {
   OpenDisputeDto,
   AssignResolverDto,
   ResolveDisputeDto,
   CancelDisputeDto,
-} from "./dto/disputes.dto";
+} from './dto/disputes.dto';
 
-/**
- * Canonical dispute statuses:
- * - open: dispute has been opened but no resolver assigned yet
- * - under_review: a resolver has been assigned and is actively reviewing the dispute
- * - assigned: legacy alias for under_review (accepted for backward compatibility, normalized to under_review on write)
- * - resolved: final resolution has been recorded
- * - cancelled: dispute was cancelled by the opener
- */
-export type DisputeStatus = "open" | "under_review" | "assigned" | "resolved" | "cancelled";
-
-/** Canonical active dispute statuses (treated identically in queries). */
-const ACTIVE_DISPUTE_STATUSES: DisputeStatus[] = ["open", "under_review", "assigned"];
+export type DisputeStatus = 'open' | 'under_review' | 'resolved' | 'cancelled';
 
 export interface Dispute {
   id: string;
@@ -53,15 +44,16 @@ export interface DisputeResolution {
 export class DisputesService {
   constructor(
     private readonly supabase: SupabaseService,
-    private readonly agreements: AgreementsService
+    private readonly agreements: AgreementsService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   private async walletForUserId(userId: string): Promise<string | null> {
     const { data, error } = await this.supabase
       .getClient()
-      .from("auth_users")
-      .select("wallet_public_key")
-      .eq("id", userId)
+      .from('auth_users')
+      .select('wallet_public_key')
+      .eq('id', userId)
       .maybeSingle();
     if (error || !data?.wallet_public_key) return null;
     return data.wallet_public_key as string;
@@ -70,37 +62,34 @@ export class DisputesService {
   private async assertActorWallet(userId: string, actorWallet: string) {
     const w = await this.walletForUserId(userId);
     if (!w || w !== actorWallet) {
-      throw new ForbiddenException("Wallet does not match authenticated user");
+      throw new ForbiddenException('Wallet does not match authenticated user');
     }
   }
 
-  private async assertCanAccessAgreement(
-    userId: string,
-    agreementId: string
-  ): Promise<void> {
+  private async assertCanAccessAgreement(userId: string, agreementId: string): Promise<void> {
     const wallet = await this.walletForUserId(userId);
-    if (!wallet) throw new ForbiddenException("No wallet on profile");
+    if (!wallet) throw new ForbiddenException('No wallet on profile');
 
     const { data: agreement, error: aErr } = await this.supabase
       .getClient()
-      .from("agreements")
-      .select("id, created_by")
-      .eq("id", agreementId)
+      .from('agreements')
+      .select('id, created_by')
+      .eq('id', agreementId)
       .maybeSingle();
-    if (aErr || !agreement) throw new NotFoundException("Agreement not found");
+    if (aErr || !agreement) throw new NotFoundException('Agreement not found');
 
     const createdBy = (agreement as { created_by: string }).created_by;
     if (createdBy === wallet || createdBy === userId) return;
 
     const { data: parts } = await this.supabase
       .getClient()
-      .from("agreement_participants")
-      .select("wallet_address")
-      .eq("agreement_id", agreementId)
-      .eq("wallet_address", wallet)
+      .from('agreement_participants')
+      .select('wallet_address')
+      .eq('agreement_id', agreementId)
+      .eq('wallet_address', wallet)
       .limit(1);
     if (!parts?.length) {
-      throw new ForbiddenException("Not a participant of this agreement");
+      throw new ForbiddenException('Not a participant of this agreement');
     }
   }
 
@@ -108,17 +97,17 @@ export class DisputesService {
     agreementId: string,
     actorWallet: string,
     action: string,
-    details: Record<string, unknown> = {}
+    details: Record<string, unknown> = {},
   ) {
     try {
-      await this.supabase.getClient().from("agreement_activity").insert({
+      await this.supabase.getClient().from('agreement_activity').insert({
         agreement_id: agreementId,
         actor_wallet: actorWallet,
         action,
         details,
       });
     } catch (e) {
-      console.error("logAgreementActivity", e);
+      console.error('logAgreementActivity', e);
     }
   }
 
@@ -129,28 +118,28 @@ export class DisputesService {
     // Check if there's already an open dispute
     const { data: existingDispute } = await this.supabase
       .getClient()
-      .from("disputes")
-      .select("id")
-      .eq("agreement_id", dto.agreement_id)
-      .in("status", ACTIVE_DISPUTE_STATUSES)
+      .from('disputes')
+      .select('id')
+      .eq('agreement_id', dto.agreement_id)
+      .in('status', ['open', 'under_review'])
       .maybeSingle();
 
     if (existingDispute) {
       return {
         dispute: null,
-        error: "There is already an open dispute for this agreement",
+        error: 'There is already an open dispute for this agreement',
       };
     }
 
     const { data: dispute, error } = await this.supabase
       .getClient()
-      .from("disputes")
+      .from('disputes')
       .insert({
         agreement_id: dto.agreement_id,
         opened_by: dto.opened_by,
         reason: dto.reason,
         evidence_urls: dto.evidence_urls || [],
-        status: "open",
+        status: 'open',
       })
       .select()
       .single();
@@ -162,112 +151,98 @@ export class DisputesService {
     // Update agreement status to disputed
     await this.supabase
       .getClient()
-      .from("agreements")
-      .update({ status: "disputed", updated_at: new Date().toISOString() })
-      .eq("id", dto.agreement_id);
+      .from('agreements')
+      .update({ status: 'disputed', updated_at: new Date().toISOString() })
+      .eq('id', dto.agreement_id);
 
-    await this.logActivity(dto.agreement_id, dto.opened_by, "dispute_opened", {
+    await this.logActivity(dto.agreement_id, dto.opened_by, 'dispute_opened', {
       dispute_id: dispute.id,
+      reason: dto.reason,
+    });
+
+    this.eventEmitter.emit(DISPUTE_OPENED, {
+      disputeId: dispute.id,
+      agreementId: dto.agreement_id,
+      openedByWallet: dto.opened_by,
       reason: dto.reason,
     });
 
     return { dispute: dispute as Dispute, error: null };
   }
 
-  async assignResolver(
-    userId: string,
-    disputeId: string,
-    dto: AssignResolverDto
-  ) {
+  async assignResolver(userId: string, disputeId: string, dto: AssignResolverDto) {
     const { data: dispute, error: fetchError } = await this.supabase
       .getClient()
-      .from("disputes")
-      .select("agreement_id, status")
-      .eq("id", disputeId)
+      .from('disputes')
+      .select('agreement_id, status')
+      .eq('id', disputeId)
       .maybeSingle();
 
     if (fetchError || !dispute) {
-      throw new NotFoundException("Dispute not found");
+      throw new NotFoundException('Dispute not found');
     }
 
     await this.assertCanAccessAgreement(userId, dispute.agreement_id);
 
-    // Accept 'open' for new disputes; 'under_review' or legacy 'assigned' for re-assignment
-    if (
-      dispute.status !== "open" &&
-      dispute.status !== "under_review" &&
-      dispute.status !== "assigned"
-    ) {
-      throw new BadRequestException(
-        "Can only assign resolver to open disputes"
-      );
+    if (dispute.status !== 'open') {
+      throw new BadRequestException('Can only assign resolver to open disputes');
     }
 
     const { error } = await this.supabase
       .getClient()
-      .from("disputes")
+      .from('disputes')
       .update({
         resolver_wallet: dto.resolver_wallet,
-        status: "under_review",
+        status: 'under_review',
         updated_at: new Date().toISOString(),
       })
-      .eq("id", disputeId);
+      .eq('id', disputeId);
 
     if (error) {
       return { success: false, error: error.message };
     }
 
-    await this.logActivity(
-      dispute.agreement_id,
-      dto.resolver_wallet,
-      "dispute_resolver_assigned",
-      { dispute_id: disputeId, resolver_wallet: dto.resolver_wallet }
-    );
+    await this.logActivity(dispute.agreement_id, dto.resolver_wallet, 'dispute_resolver_assigned', {
+      dispute_id: disputeId,
+      resolver_wallet: dto.resolver_wallet,
+    });
 
     return { success: true, error: null };
   }
 
-  async resolveDispute(
-    userId: string,
-    disputeId: string,
-    dto: ResolveDisputeDto
-  ) {
+  async resolveDispute(userId: string, disputeId: string, dto: ResolveDisputeDto) {
     await this.assertActorWallet(userId, dto.resolved_by);
 
     // Validate percentages
     if (dto.payer_percentage + dto.payee_percentage !== 100) {
-      throw new BadRequestException("Percentages must sum to 100%");
+      throw new BadRequestException('Percentages must sum to 100%');
     }
 
     const { data: dispute, error: fetchError } = await this.supabase
       .getClient()
-      .from("disputes")
-      .select("id, agreement_id, status, resolver_wallet")
-      .eq("id", disputeId)
+      .from('disputes')
+      .select('id, agreement_id, status, resolver_wallet')
+      .eq('id', disputeId)
       .maybeSingle();
 
     if (fetchError || !dispute) {
-      throw new NotFoundException("Dispute not found");
+      throw new NotFoundException('Dispute not found');
     }
 
-    if (dispute.status === "resolved" || dispute.status === "cancelled") {
-      throw new BadRequestException(
-        dispute.status === "resolved"
-          ? "Dispute is already resolved"
-          : "Cannot resolve a cancelled dispute"
-      );
+    if (dispute.status === 'resolved') {
+      throw new BadRequestException('Dispute is already resolved');
     }
 
     // Create resolution
     const { data: resolution, error: resError } = await this.supabase
       .getClient()
-      .from("dispute_resolutions")
+      .from('dispute_resolutions')
       .insert({
         dispute_id: disputeId,
         resolved_by: dto.resolved_by,
         payer_percentage: dto.payer_percentage,
         payee_percentage: dto.payee_percentage,
-        resolution_notes: dto.resolution_notes || "",
+        resolution_notes: dto.resolution_notes || '',
       })
       .select()
       .single();
@@ -279,36 +254,40 @@ export class DisputesService {
     // Update dispute status
     await this.supabase
       .getClient()
-      .from("disputes")
+      .from('disputes')
       .update({
-        status: "resolved",
+        status: 'resolved',
         resolved_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq("id", disputeId);
+      .eq('id', disputeId);
 
     // Update agreement status
     await this.supabase
       .getClient()
-      .from("agreements")
+      .from('agreements')
       .update({
-        status: "resolved",
+        status: 'resolved',
         completed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq("id", dispute.agreement_id);
+      .eq('id', dispute.agreement_id);
 
-    await this.logActivity(
-      dispute.agreement_id,
-      dto.resolved_by,
-      "dispute_resolved",
-      {
-        dispute_id: disputeId,
-        payer_percentage: dto.payer_percentage,
-        payee_percentage: dto.payee_percentage,
-        resolution_notes: dto.resolution_notes,
-      }
-    );
+    await this.logActivity(dispute.agreement_id, dto.resolved_by, 'dispute_resolved', {
+      dispute_id: disputeId,
+      payer_percentage: dto.payer_percentage,
+      payee_percentage: dto.payee_percentage,
+      resolution_notes: dto.resolution_notes,
+    });
+
+    this.eventEmitter.emit(DISPUTE_RESOLVED, {
+      disputeId,
+      agreementId: dispute.agreement_id,
+      resolvedByWallet: dto.resolved_by,
+      payerPercentage: dto.payer_percentage,
+      payeePercentage: dto.payee_percentage,
+      resolutionNotes: dto.resolution_notes || '',
+    });
 
     return { resolution: resolution as DisputeResolution, error: null };
   }
@@ -318,35 +297,31 @@ export class DisputesService {
 
     const { data: dispute, error: fetchError } = await this.supabase
       .getClient()
-      .from("disputes")
-      .select("agreement_id, opened_by, status")
-      .eq("id", disputeId)
+      .from('disputes')
+      .select('agreement_id, opened_by, status')
+      .eq('id', disputeId)
       .maybeSingle();
 
     if (fetchError || !dispute) {
-      throw new NotFoundException("Dispute not found");
+      throw new NotFoundException('Dispute not found');
     }
 
     if (dispute.opened_by !== dto.cancelled_by) {
-      throw new ForbiddenException("Only the dispute opener can cancel it");
+      throw new ForbiddenException('Only the dispute opener can cancel it');
     }
 
-    if (dispute.status === "resolved" || dispute.status === "cancelled") {
-      throw new BadRequestException(
-        dispute.status === "resolved"
-          ? "Cannot cancel a resolved dispute"
-          : "Dispute is already cancelled"
-      );
+    if (dispute.status === 'resolved') {
+      throw new BadRequestException('Cannot cancel a resolved dispute');
     }
 
     const { error } = await this.supabase
       .getClient()
-      .from("disputes")
+      .from('disputes')
       .update({
-        status: "cancelled",
+        status: 'cancelled',
         updated_at: new Date().toISOString(),
       })
-      .eq("id", disputeId);
+      .eq('id', disputeId);
 
     if (error) {
       return { success: false, error: error.message };
@@ -355,25 +330,22 @@ export class DisputesService {
     // Revert agreement status to active
     await this.supabase
       .getClient()
-      .from("agreements")
-      .update({ status: "active", updated_at: new Date().toISOString() })
-      .eq("id", dispute.agreement_id);
+      .from('agreements')
+      .update({ status: 'active', updated_at: new Date().toISOString() })
+      .eq('id', dispute.agreement_id);
 
-    await this.logActivity(
-      dispute.agreement_id,
-      dto.cancelled_by,
-      "dispute_cancelled",
-      { dispute_id: disputeId }
-    );
+    await this.logActivity(dispute.agreement_id, dto.cancelled_by, 'dispute_cancelled', {
+      dispute_id: disputeId,
+    });
 
     return { success: true, error: null };
   }
 
-  async getOpenDisputes(userId: string) {
+  async getOpenDisputes(_userId: string) {
     // This endpoint is for dispute resolvers - they can see all open disputes
     const { data, error } = await this.supabase
       .getClient()
-      .from("disputes")
+      .from('disputes')
       .select(
         `
         *,
@@ -383,10 +355,10 @@ export class DisputesService {
           amount,
           contract_id
         )
-      `
+      `,
       )
-      .in("status", ACTIVE_DISPUTE_STATUSES)
-      .order("created_at", { ascending: false });
+      .in('status', ['open', 'under_review'])
+      .order('created_at', { ascending: false });
 
     if (error) {
       return { disputes: [], error: error.message };
@@ -400,7 +372,7 @@ export class DisputesService {
 
     const { data, error } = await this.supabase
       .getClient()
-      .from("disputes")
+      .from('disputes')
       .select(
         `
         *,
@@ -410,10 +382,10 @@ export class DisputesService {
           amount,
           contract_id
         )
-      `
+      `,
       )
-      .eq("resolver_wallet", resolverWallet)
-      .order("created_at", { ascending: false });
+      .eq('resolver_wallet', resolverWallet)
+      .order('created_at', { ascending: false });
 
     if (error) {
       return { disputes: [], error: error.message };
@@ -425,7 +397,7 @@ export class DisputesService {
   async getDisputeById(userId: string, disputeId: string) {
     const { data: dispute, error: disputeError } = await this.supabase
       .getClient()
-      .from("disputes")
+      .from('disputes')
       .select(
         `
         *,
@@ -435,13 +407,13 @@ export class DisputesService {
           amount,
           contract_id
         )
-      `
+      `,
       )
-      .eq("id", disputeId)
+      .eq('id', disputeId)
       .maybeSingle();
 
     if (disputeError || !dispute) {
-      throw new NotFoundException("Dispute not found");
+      throw new NotFoundException('Dispute not found');
     }
 
     // Check access
@@ -450,9 +422,9 @@ export class DisputesService {
     // Get resolution if exists
     const { data: resolution } = await this.supabase
       .getClient()
-      .from("dispute_resolutions")
-      .select("*")
-      .eq("dispute_id", disputeId)
+      .from('dispute_resolutions')
+      .select('*')
+      .eq('dispute_id', disputeId)
       .maybeSingle();
 
     return {
@@ -467,10 +439,10 @@ export class DisputesService {
 
     const { data, error } = await this.supabase
       .getClient()
-      .from("disputes")
-      .select("*")
-      .eq("agreement_id", agreementId)
-      .order("created_at", { ascending: false });
+      .from('disputes')
+      .select('*')
+      .eq('agreement_id', agreementId)
+      .order('created_at', { ascending: false });
 
     if (error) {
       return { disputes: [], error: error.message };
