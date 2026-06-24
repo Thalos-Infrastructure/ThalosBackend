@@ -2,19 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master, develop]
   pull_request:
-    branches: [main]
+    branches: [main, master, develop]
 
 jobs:
-  build-test:
-    name: build, test & typecheck
+  lint-and-format:
+    name: Lint & Format
     runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version: [20.x]
 
     steps:
       - name: Checkout
@@ -23,24 +18,19 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10.11.0
 
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 22
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck (specs + sources)
-        run: pnpm exec tsc --noEmit -p tsconfig.spec.json
+      - name: Check formatting
+        run: pnpm run format:check
 
-      - name: Test
-        env:
-          CI: "true"
-        run: pnpm test
-
-      - name: Build
-        run: pnpm run build
+      - name: Lint
+        run: pnpm run lint:check

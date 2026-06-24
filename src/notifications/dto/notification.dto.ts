@@ -1,11 +1,4 @@
-import {
-  IsString,
-  IsNotEmpty,
-  IsOptional,
-  IsArray,
-  IsNumber,
-  Min,
-} from "class-validator";
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, Min } from 'class-validator';
 
 export class NotifyAgreementCreatedDto {
   @IsString()
@@ -90,6 +83,14 @@ export class NotifyEvidenceSubmittedDto {
 
   @IsString()
   @IsNotEmpty()
+  milestone_amount: string;
+
+  @IsString()
+  @IsNotEmpty()
+  asset: string;
+
+  @IsString()
+  @IsNotEmpty()
   submitted_by_wallet: string;
 
   @IsString()
@@ -99,6 +100,11 @@ export class NotifyEvidenceSubmittedDto {
   @IsString()
   @IsOptional()
   evidence_description?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  evidence_urls?: string[];
 }
 
 export class NotifyMilestoneApprovedDto {

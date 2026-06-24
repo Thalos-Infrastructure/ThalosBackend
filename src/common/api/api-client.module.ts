@@ -1,5 +1,5 @@
-import { Module } from "@nestjs/common";
-import { ApiClient } from "./api-client";
+import { Module } from '@nestjs/common';
+import { ApiClient } from './api-client';
 
 @Module({
   providers: [ApiClient],
