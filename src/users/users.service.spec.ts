@@ -1,20 +1,17 @@
-import { Test } from "@nestjs/testing";
-import { SupabaseService } from "../supabase/supabase.service";
-import { UsersService } from "./users.service";
-import {
-  createSupabaseClientMock,
-  createSupabaseQueryMock,
-} from "../../test/supabase.mock";
+import { Test } from '@nestjs/testing';
+import { SupabaseService } from '../supabase/supabase.service';
+import { UsersService } from './users.service';
+import { createSupabaseClientMock, createSupabaseQueryMock } from '../../test/supabase.mock';
 
-describe("UsersService", () => {
-  it("searches profiles with a mocked Supabase client", async () => {
+describe('UsersService', () => {
+  it('searches profiles with a mocked Supabase client', async () => {
     const query = createSupabaseQueryMock({
       data: [
         {
-          id: "profile-1",
-          display_name: "Ada Lovelace",
-          email: "ada@example.com",
-          wallet_address: "GADA",
+          id: 'profile-1',
+          display_name: 'Ada Lovelace',
+          email: 'ada@example.com',
+          wallet_address: 'GADA',
         },
       ],
       error: null,
@@ -35,14 +32,14 @@ describe("UsersService", () => {
     const service = moduleRef.get(UsersService);
 
     await expect(
-      service.search("current-user", { q: "Ada_%", page: 2, limit: 5 }),
+      service.search('current-user', { q: 'Ada_%', page: 2, limit: 5 }),
     ).resolves.toEqual({
       users: [
         {
-          id: "profile-1",
-          name: "Ada Lovelace",
-          email: "ada@example.com",
-          wallet_address: "GADA",
+          id: 'profile-1',
+          name: 'Ada Lovelace',
+          email: 'ada@example.com',
+          wallet_address: 'GADA',
         },
       ],
       page: 2,
@@ -51,14 +48,13 @@ describe("UsersService", () => {
       error: null,
     });
 
-    expect(client.from).toHaveBeenCalledWith("profiles");
-    expect(query.select).toHaveBeenCalledWith(
-      "id, display_name, email, wallet_address",
-      { count: "exact" },
-    );
-    expect(query.neq).toHaveBeenCalledWith("id", "current-user");
+    expect(client.from).toHaveBeenCalledWith('profiles');
+    expect(query.select).toHaveBeenCalledWith('id, display_name, email, wallet_address', {
+      count: 'exact',
+    });
+    expect(query.neq).toHaveBeenCalledWith('id', 'current-user');
     expect(query.or).toHaveBeenCalledWith(
-      "display_name.ilike.%Ada%,email.ilike.%Ada%,wallet_address.ilike.%Ada%",
+      'display_name.ilike.%Ada%,email.ilike.%Ada%,wallet_address.ilike.%Ada%',
     );
     expect(query.range).toHaveBeenCalledWith(5, 9);
   });

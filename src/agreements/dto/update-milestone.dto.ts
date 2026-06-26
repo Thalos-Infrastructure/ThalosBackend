@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsString, Min } from 'class-validator';
+import { IsArray, IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 export class UpdateMilestoneDto {
   @IsInt()

@@ -1,16 +1,9 @@
-import { Type } from "class-transformer";
-import {
-  IsArray,
-  IsIn,
-  IsNumber,
-  IsOptional,
-  IsString,
-  ValidateNested,
-} from "class-validator";
+import { Type } from 'class-transformer';
+import { IsArray, IsIn, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
 
-export type ServiceType = "single-release" | "multi-release";
+export type ServiceType = 'single-release' | 'multi-release';
 
-const SERVICE_TYPES: ServiceType[] = ["single-release", "multi-release"];
+const SERVICE_TYPES: ServiceType[] = ['single-release', 'multi-release'];
 
 /* ---------------- Create escrow ---------------- */
 

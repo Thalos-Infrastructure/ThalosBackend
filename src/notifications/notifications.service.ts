@@ -1,6 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Resend } from 'resend';
+import { AgreementEventName } from '../events/agreement-events';
 import { SupabaseService } from '../supabase/supabase.service';
 import {
   AgreementCreatedData,
@@ -27,16 +29,48 @@ import {
   type DisputeResolvedEventPayload,
 } from '../common/constants/notification-events';
 
+/**
+ * Fallback sender address used when EMAIL_FROM is not configured.
+ *
+ * Keeping the same domain as the historical default so existing Resend
+ * domain verifications continue to work out-of-the-box. Override by setting
+ * EMAIL_FROM (and optionally EMAIL_REPLY_TO) in the environment.
+ *
+ * Variable names intentionally match the Thalos frontend
+ * (`lib/email/resend.ts` → `EMAIL_FROM`, `EMAIL_REPLY_TO`).
+ */
+const DEFAULT_FROM_EMAIL = 'Thalos <notifications@thalosplatform.xyz>';
+const DEFAULT_REPLY_TO = 'Thalos <no-reply@thalosplatform.xyz>';
+
+/**
+ * Read an env var via ConfigService, trimming whitespace, falling back to
+ * `fallback` when unset or blank. Centralised so tests can rely on the same
+ * parsing rules as production.
+ */
+function pickFromEnv(config: ConfigService, key: string, fallback: string): string {
+  const raw = config.get<string>(key);
+  if (raw == null) return fallback;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+}
+
 @Injectable()
 export class NotificationsService implements OnModuleInit {
   private readonly logger = new Logger(NotificationsService.name);
   private resend: Resend;
-  private readonly fromEmail = 'Thalos <notifications@thalosplatform.xyz>';
+  private fromEmail = DEFAULT_FROM_EMAIL;
+  private replyTo = DEFAULT_REPLY_TO;
 
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(
+    private readonly supabase: SupabaseService,
+    private readonly configService: ConfigService,
+  ) {
+    this.fromEmail = pickFromEnv(this.configService, 'EMAIL_FROM', DEFAULT_FROM_EMAIL);
+    this.replyTo = pickFromEnv(this.configService, 'EMAIL_REPLY_TO', DEFAULT_REPLY_TO);
+  }
 
   onModuleInit() {
-    const apiKey = process.env.RESEND_API_KEY;
+    const apiKey = this.configService.get<string>('RESEND_API_KEY');
     if (!apiKey) {
       this.logger.warn('RESEND_API_KEY not configured - email notifications disabled');
       return;
@@ -77,7 +111,7 @@ export class NotificationsService implements OnModuleInit {
       .eq('agreement_id', agreementId);
 
     if (excludedWallet) {
-      query = query.neq("wallet_address", excludedWallet);
+      query = query.neq('wallet_address', excludedWallet);
     }
 
     const { data: participants, error } = await query;
@@ -97,7 +131,9 @@ export class NotificationsService implements OnModuleInit {
   }
 
   /**
-   * Send email using Resend
+   * Send email using Resend. Mirrors the frontend payload shape (`replyTo`
+   * always present, never undefined, so Resend's API contract is satisfied
+   * even when only `from` is overridden).
    */
   private async sendEmail(to: string | string[], subject: string, html: string): Promise<boolean> {
     if (!this.resend) {
@@ -117,6 +153,7 @@ export class NotificationsService implements OnModuleInit {
         to: recipients,
         subject,
         html,
+        replyTo: this.replyTo,
       });
 
       if (error) {
@@ -132,21 +169,21 @@ export class NotificationsService implements OnModuleInit {
     }
   }
 
-  @OnEvent(AgreementEventNames.EvidenceSubmitted)
+  @OnEvent(AgreementEventName.EvidenceSubmitted)
   async handleEvidenceSubmitted(data: EvidenceSubmittedData): Promise<void> {
     try {
       await this.notifyEvidenceSubmitted(data, data.submittedByWallet);
     } catch (error) {
-      this.logger.error("Failed to handle evidence submitted event", error);
+      this.logger.error('Failed to handle evidence submitted event', error);
     }
   }
 
-  @OnEvent(AgreementEventNames.MilestoneApproved)
+  @OnEvent(AgreementEventName.MilestoneApproved)
   async handleMilestoneApproved(data: MilestoneApprovedData): Promise<void> {
     try {
       await this.notifyMilestoneApproved(data);
     } catch (error) {
-      this.logger.error("Failed to handle milestone approved event", error);
+      this.logger.error('Failed to handle milestone approved event', error);
     }
   }
 

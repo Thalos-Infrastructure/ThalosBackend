@@ -10,7 +10,7 @@ function getBaseUrl(): string {
 
 function getApiKey(): string {
   const k = process.env.TRUSTLESSWORK_API_KEY;
-  if (!k) throw new BadRequestException("TRUSTLESSWORK_API_KEY not set");
+  if (!k) throw new BadRequestException('TRUSTLESSWORK_API_KEY not set');
   return k;
 }
 
@@ -28,8 +28,8 @@ function assertAllowedPath(path: string): void {
  */
 function buildHeaders(): Record<string, string> {
   return {
-    "Content-Type": "application/json",
-    "x-api-key": getApiKey(),
+    'Content-Type': 'application/json',
+    'x-api-key': getApiKey(),
   };
 }
 
@@ -53,7 +53,7 @@ export async function relayToTrustless(
   const res = await fetch(url.toString(), {
     method,
     headers: buildHeaders(),
-    body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
+    body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
   });
 
   const text = await res.text();

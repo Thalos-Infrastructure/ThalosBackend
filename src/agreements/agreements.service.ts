@@ -262,9 +262,7 @@ export class AgreementsService {
     }
 
     const milestone = milestones[dto.milestone_index];
-    const previousStatus = milestone.status;
-    const emitsEvidence =
-      dto.evidence_description !== undefined || dto.evidence_urls !== undefined;
+    const emitsEvidence = dto.evidence_description !== undefined || dto.evidence_urls !== undefined;
 
     milestone.status = dto.status;
 

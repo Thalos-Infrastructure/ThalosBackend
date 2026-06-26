@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUserCtx } from '../auth/current-user.decorator';
 import { DisputesService } from './disputes.service';
@@ -9,12 +10,20 @@ import {
   CancelDisputeDto,
 } from './dto/disputes.dto';
 
+@ApiTags('disputes')
+@ApiBearerAuth('bearer')
 @Controller('disputes')
 @UseGuards(JwtAuthGuard)
 export class DisputesController {
   constructor(private readonly disputes: DisputesService) {}
 
   @Post()
+  @ApiOperation({
+    summary: 'Open a new dispute',
+    description:
+      'Opens a dispute on an agreement. Only one open/under_review dispute is allowed per agreement. ' +
+      "Updates the agreement status to 'disputed'.",
+  })
   openDispute(@CurrentUser() user: AuthUserCtx, @Body() dto: OpenDisputeDto) {
     return this.disputes.openDispute(user.userId, dto);
   }
