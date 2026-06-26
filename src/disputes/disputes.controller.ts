@@ -18,6 +18,12 @@ export class DisputesController {
   constructor(private readonly disputes: DisputesService) {}
 
   @Post()
+  @ApiOperation({
+    summary: "Open a new dispute",
+    description:
+      "Opens a dispute on an agreement. Only one open/under_review dispute is allowed per agreement. " +
+      "Updates the agreement status to 'disputed'.",
+  })
   openDispute(@CurrentUser() user: AuthUserCtx, @Body() dto: OpenDisputeDto) {
     return this.disputes.openDispute(user.userId, dto);
   }
