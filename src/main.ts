@@ -4,7 +4,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const origin = process.env.THALOS_CORS_ORIGIN;
   app.enableCors({
     origin: origin ? origin.split(',').map((o) => o.trim()) : true,

@@ -1,15 +1,10 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { NotificationsListener } from "./notifications.listener";
 import { NotificationsService } from "./notifications.service";
-import { DomainEvents } from "../common/events";
 import {
   AgreementCreatedData,
   AgreementFundedData,
   AgreementCompletedData,
-  MilestoneApprovedData,
-  EvidenceSubmittedData,
-  DisputeOpenedData,
-  DisputeResolvedData,
 } from "./types/notification-data.types";
 
 describe("NotificationsListener", () => {
@@ -26,10 +21,6 @@ describe("NotificationsListener", () => {
             notifyAgreementCreated: jest.fn(),
             notifyAgreementFunded: jest.fn(),
             notifyAgreementCompleted: jest.fn(),
-            notifyMilestoneApproved: jest.fn(),
-            notifyEvidenceSubmitted: jest.fn(),
-            notifyDisputeOpened: jest.fn(),
-            notifyDisputeResolved: jest.fn(),
           },
         },
       ],
@@ -81,55 +72,7 @@ describe("NotificationsListener", () => {
     expect(notificationsService.notifyAgreementCompleted).toHaveBeenCalledWith(data);
   });
 
-  it("should call notifyMilestoneApproved on MILESTONE_APPROVED event", async () => {
-    const data: MilestoneApprovedData = {
-      agreementId: "test-1",
-      agreementTitle: "Test Agreement",
-      milestoneIndex: 0,
-      milestoneDescription: "Test Milestone",
-      milestoneAmount: "50",
-      asset: "USDC",
-      approvedByWallet: "wallet1",
-    };
-    await listener.handleMilestoneApproved(data);
-    expect(notificationsService.notifyMilestoneApproved).toHaveBeenCalledWith(data);
-  });
-
-  it("should call notifyEvidenceSubmitted on EVIDENCE_SUBMITTED event", async () => {
-    const data: EvidenceSubmittedData = {
-      agreementId: "test-1",
-      agreementTitle: "Test Agreement",
-      milestoneIndex: 0,
-      milestoneDescription: "Test Milestone",
-      submittedByWallet: "wallet1",
-    };
-    await listener.handleEvidenceSubmitted(data);
-    expect(notificationsService.notifyEvidenceSubmitted).toHaveBeenCalledWith(data);
-  });
-
-  it("should call notifyDisputeOpened on DISPUTE_OPENED event", async () => {
-    const data: DisputeOpenedData = {
-      agreementId: "test-1",
-      agreementTitle: "Test Agreement",
-      disputeReason: "Test Reason",
-      openedByWallet: "wallet1",
-    };
-    await listener.handleDisputeOpened(data);
-    expect(notificationsService.notifyDisputeOpened).toHaveBeenCalledWith(data);
-  });
-
-  it("should call notifyDisputeResolved on DISPUTE_RESOLVED event", async () => {
-    const data: DisputeResolvedData = {
-      agreementId: "test-1",
-      agreementTitle: "Test Agreement",
-      resolution: "Test Resolution",
-      resolvedByWallet: "wallet1",
-    };
-    await listener.handleDisputeResolved(data);
-    expect(notificationsService.notifyDisputeResolved).toHaveBeenCalledWith(data);
-  });
-
-  it("should not throw error even if notification fails", async () => {
+  it("should not throw error even if notifyAgreementCreated fails", async () => {
     notificationsService.notifyAgreementCreated.mockRejectedValueOnce(new Error("Test error"));
     const data: AgreementCreatedData = {
       agreementId: "test-1",

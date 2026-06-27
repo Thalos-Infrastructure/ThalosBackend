@@ -15,6 +15,7 @@ import { DisputesModule } from './disputes/disputes.module';
 import { ProfilesModule } from './profiles/profiles.module';
 import { WalletsModule } from './wallets/wallets.module';
 import { EventsModule } from './events/events.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { EventsModule } from './events/events.module';
     ProfilesModule,
     WalletsModule,
     EventsModule,
+    WebhooksModule,
   ],
   controllers: [RootController],
 })
