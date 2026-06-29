@@ -13,7 +13,7 @@ import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@ne
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthUserCtx } from '../auth/current-user.decorator';
 import { WalletsService } from './wallets.service';
-import { LinkWalletDto, UpdateWalletDto } from './dto/wallets.dto';
+import { LinkWalletDto, UpdateWalletDto, VerifyWalletDto } from './dto/wallets.dto';
 import { VerificationChallengeQueryDto } from './dto/verification-challenge.dto';
 
 @ApiTags('wallets')
@@ -101,6 +101,24 @@ export class WalletsController {
   @Post()
   async linkWallet(@CurrentUser() user: AuthUserCtx, @Body() dto: LinkWalletDto) {
     return this.walletsService.linkWallet(user.userId, dto);
+  }
+
+  /**
+   * POST /wallets/:id/verify
+   * Verify a previously linked but unverified wallet
+   */
+  @Post(':id/verify')
+  @ApiOperation({ summary: 'Verify a previously linked wallet with SEP-0043 signature' })
+  @ApiResponse({ status: 200, description: 'Wallet verified successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid signature or address mismatch' })
+  @ApiResponse({ status: 403, description: 'Invalid or expired challenge' })
+  @ApiResponse({ status: 404, description: 'Wallet not found' })
+  async verifyWallet(
+    @CurrentUser() user: AuthUserCtx,
+    @Param('id') walletId: string,
+    @Body() dto: VerifyWalletDto,
+  ) {
+    return this.walletsService.verifyWallet(user.userId, walletId, dto);
   }
 
   /**

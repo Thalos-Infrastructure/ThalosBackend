@@ -2,6 +2,7 @@ import { createHmac, randomBytes } from 'crypto';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -9,7 +10,13 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ApiClient } from '../common/api/api-client';
-import { LinkWalletDto, UpdateWalletDto, WalletType } from './dto/wallets.dto';
+import { LinkWalletDto, UpdateWalletDto, VerifyWalletDto, WalletType } from './dto/wallets.dto';
+import {
+  WALLET_OWNERSHIP_PREFIX,
+  networkPassphrase,
+  parseAndVerifyChallenge,
+  verifyStellarSignature,
+} from './helpers/stellar-verification.helper';
 
 export interface UserWallet {
   id: string;
@@ -51,17 +58,18 @@ export class WalletsService {
   private readonly horizonUrl: string;
   private readonly usdcAssetCode = 'USDC';
   private readonly usdcIssuer: string;
+  private readonly stellarNetwork: string;
 
   constructor(
     private readonly supabase: SupabaseService,
     private readonly config: ConfigService,
     private readonly apiClient: ApiClient,
   ) {
-    const network = this.config.get<string>('STELLAR_NETWORK') || 'testnet';
+    this.stellarNetwork = this.config.get<string>('STELLAR_NETWORK') || 'testnet';
     this.horizonUrl =
-      network === 'mainnet' ? 'https://horizon.stellar.org' : 'https://horizon-testnet.stellar.org';
+      this.stellarNetwork === 'mainnet' ? 'https://horizon.stellar.org' : 'https://horizon-testnet.stellar.org';
     this.usdcIssuer =
-      network === 'mainnet'
+      this.stellarNetwork === 'mainnet'
         ? 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN' // Circle USDC mainnet
         : 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'; // Testnet USDC
   }
@@ -196,8 +204,45 @@ export class WalletsService {
 
     const isPrimary = count === 0;
 
-    // For non-custodial wallets, require verification
-    const isVerified = dto.wallet_type === 'custodial';
+    // For non-custodial wallets, require valid SEP-0043 signature
+    let isVerified = false;
+    let verifiedAt: string | null = null;
+
+    if (dto.wallet_type === 'custodial') {
+      // Custodial wallets are auto-verified
+      isVerified = true;
+      verifiedAt = new Date().toISOString();
+    } else {
+      // Non-custodial: require signed_message + signature
+      if (!dto.signed_message || !dto.signature) {
+        throw new BadRequestException(
+          'signed_message and signature are required for non-custodial wallets',
+        );
+      }
+
+      const jwtSecret = this.config.get<string>('JWT_SECRET');
+      if (!jwtSecret) {
+        throw new InternalServerErrorException('Server misconfiguration');
+      }
+
+      // 1. Parse & verify the HMAC-proofed challenge
+      const payload = parseAndVerifyChallenge(dto.signed_message, jwtSecret);
+
+      // 2. Check challenge belongs to this user and wallet
+      if (payload.sub !== userId) {
+        throw new ForbiddenException('Challenge was not issued for this user');
+      }
+      if (payload.addr !== dto.wallet_address) {
+        throw new ForbiddenException('Challenge was not issued for this wallet address');
+      }
+
+      // 3. Verify Stellar Ed25519 signature
+      const passphrase = networkPassphrase(this.stellarNetwork);
+      verifyStellarSignature(dto.signed_message, dto.signature, dto.wallet_address, passphrase);
+
+      isVerified = true;
+      verifiedAt = new Date().toISOString();
+    }
 
     const { data, error } = await this.supabase
       .getClient()
@@ -209,7 +254,7 @@ export class WalletsService {
         label: dto.label || null,
         is_primary: isPrimary,
         is_verified: isVerified,
-        verified_at: isVerified ? new Date().toISOString() : null,
+        verified_at: verifiedAt,
       })
       .select()
       .single();
@@ -466,7 +511,7 @@ export class WalletsService {
     const sig = createHmac('sha256', secret).update(payloadB64).digest('base64url');
 
     const message =
-      `Thalos Wallet Ownership Proof\n` +
+      `${WALLET_OWNERSHIP_PREFIX}\n` +
       `\n` +
       `I authorize linking this wallet to my Thalos account.\n` +
       `Account: ${userId}\n` +
@@ -478,5 +523,79 @@ export class WalletsService {
       `Proof: ${payloadB64}.${sig}`;
 
     return { message, expires_at: expiresAt.toISOString() };
+  }
+
+  /**
+   * POST /wallets/:id/verify
+   * Verify a previously linked but unverified wallet using SEP-0043 signature.
+   */
+  async verifyWallet(
+    userId: string,
+    walletId: string,
+    dto: VerifyWalletDto,
+  ): Promise<{ wallet: UserWallet | null; error: string | null }> {
+    // Fetch the wallet and confirm ownership
+    const { data: wallet, error: fetchError } = await this.supabase
+      .getClient()
+      .from('user_wallets')
+      .select('*')
+      .eq('id', walletId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (fetchError || !wallet) {
+      throw new NotFoundException('Wallet not found');
+    }
+
+    const existingWallet = wallet as UserWallet;
+
+    if (existingWallet.is_verified) {
+      return { wallet: existingWallet, error: null };
+    }
+
+    // Wallet address must match
+    if (existingWallet.wallet_address !== dto.wallet_address) {
+      throw new BadRequestException('Wallet address does not match');
+    }
+
+    const jwtSecret = this.config.get<string>('JWT_SECRET');
+    if (!jwtSecret) {
+      throw new InternalServerErrorException('Server misconfiguration');
+    }
+
+    // 1. Parse & verify the HMAC-proofed challenge
+    const payload = parseAndVerifyChallenge(dto.signed_message, jwtSecret);
+
+    // 2. Check challenge belongs to this user and wallet
+    if (payload.sub !== userId) {
+      throw new ForbiddenException('Challenge was not issued for this user');
+    }
+    if (payload.addr !== dto.wallet_address) {
+      throw new ForbiddenException('Challenge was not issued for this wallet address');
+    }
+
+    // 3. Verify Stellar Ed25519 signature
+    const passphrase = networkPassphrase(this.stellarNetwork);
+    verifyStellarSignature(dto.signed_message, dto.signature, dto.wallet_address, passphrase);
+
+    // 4. Mark as verified
+    const now = new Date().toISOString();
+    const { data, error } = await this.supabase
+      .getClient()
+      .from('user_wallets')
+      .update({
+        is_verified: true,
+        verified_at: now,
+        updated_at: now,
+      })
+      .eq('id', walletId)
+      .select()
+      .single();
+
+    if (error) {
+      return { wallet: null, error: error.message };
+    }
+
+    return { wallet: data as UserWallet, error: null };
   }
 }
