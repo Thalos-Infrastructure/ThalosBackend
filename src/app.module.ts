@@ -16,6 +16,7 @@ import { ProfilesModule } from './profiles/profiles.module';
 import { WalletsModule } from './wallets/wallets.module';
 import { EventsModule } from './events/events.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { KycModule } from './kyc/kyc.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     WalletsModule,
     EventsModule,
     WebhooksModule,
+    KycModule,
   ],
   controllers: [RootController],
 })
