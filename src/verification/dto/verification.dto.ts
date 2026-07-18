@@ -11,15 +11,17 @@ export enum VerificationStatus {
   COMPLETED = 'completed',
   FAILED = 'failed',
   EXPIRED = 'expired',
+  CANCELLED = 'cancelled',
 }
 
 export enum VerificationProvider {
   MOCK = 'mock',
-  ONFIDO = 'onfido',
   SUMSUB = 'sumsub',
-  VERIFF = 'veriff',
   PERSONA = 'persona',
-  TRULIOO = 'trulioo',
+  VERIFF = 'veriff',
+  SYNAPS = 'synaps',
+  STRIPE_IDENTITY = 'stripe_identity',
+  ALLOY = 'alloy',
 }
 
 export interface VerificationSubject {
@@ -75,6 +77,7 @@ export interface VerificationSession {
   updated_at: string;
   expires_at?: string;
   completed_at?: string;
+  cancelled_at?: string;
 }
 
 export interface ProviderCreateSessionResponse {
@@ -87,6 +90,26 @@ export interface ProviderStatusResponse {
   status: VerificationStatus;
   result?: VerificationSession['result'];
   error?: VerificationSession['error'];
+}
+
+/**
+ * Normalized verification result returned by a provider.
+ * Providers translate their vendor-specific payloads into this shape so that
+ * the core services never depend on a specific vendor's response format.
+ */
+export interface ProviderVerificationResult {
+  status: VerificationStatus;
+  result?: VerificationSession['result'];
+  error?: VerificationSession['error'];
+  completed_at?: string;
+}
+
+/**
+ * Outcome of a cancellation request against a provider session.
+ */
+export interface ProviderCancelResponse {
+  cancelled: boolean;
+  status: VerificationStatus;
 }
 
 export interface ProviderWebhookPayload {

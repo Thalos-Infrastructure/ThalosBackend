@@ -28,7 +28,7 @@ export class VerificationService {
       throw new BadRequestException('Verification type (kyc or kyb) is required');
     }
 
-    const provider = dto.provider ?? VerificationProvider.MOCK;
+    const provider = dto.provider ?? this.providerFactory.getDefaultProviderName();
     const providerInstance = this.providerFactory.getProvider({ provider });
 
     if (!providerInstance.supportedTypes.includes(dto.type)) {
@@ -208,6 +208,147 @@ export class VerificationService {
     }
 
     return { sessions: (sessions as VerificationSession[]) || [], error: null };
+  }
+
+  /**
+   * Retrieve Verification Results.
+   *
+   * Fetches the normalized verification outcome from the provider and persists
+   * it against the local session. Falls back to the stored result when the
+   * provider does not expose a dedicated results endpoint.
+   */
+  async getResults(
+    userId: string,
+    sessionId: string,
+  ): Promise<{ session: VerificationSession | null; error: string | null }> {
+    const { data: session, error: fetchError } = await this.supabase
+      .getClient()
+      .from('verification_sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (fetchError || !session) {
+      return { session: null, error: 'Verification session not found' };
+    }
+
+    const existingSession = session as VerificationSession;
+
+    if (!existingSession.provider_session_id) {
+      return { session: existingSession, error: null };
+    }
+
+    const provider = this.providerFactory.getProvider({ provider: existingSession.provider });
+
+    // Provider does not support a dedicated results operation: return stored data.
+    if (typeof provider.getResults !== 'function') {
+      return { session: existingSession, error: null };
+    }
+
+    try {
+      const providerResult = await provider.getResults(existingSession.provider_session_id);
+
+      const updates: Record<string, unknown> = {
+        status: providerResult.status,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (providerResult.result) {
+        updates.result = providerResult.result;
+      }
+      if (providerResult.error) {
+        updates.error = providerResult.error;
+      }
+      if (providerResult.status === VerificationStatus.COMPLETED) {
+        updates.completed_at = providerResult.completed_at ?? new Date().toISOString();
+      }
+
+      await this.supabase
+        .getClient()
+        .from('verification_sessions')
+        .update(updates)
+        .eq('id', sessionId);
+
+      Object.assign(existingSession, updates);
+
+      return { session: existingSession, error: null };
+    } catch (err) {
+      return {
+        session: existingSession,
+        error: err instanceof Error ? err.message : 'Failed to retrieve verification results',
+      };
+    }
+  }
+
+  /**
+   * Cancel Verification.
+   *
+   * Requests cancellation from the provider (when supported) and marks the
+   * local session as cancelled. Terminal sessions cannot be cancelled.
+   */
+  async cancelSession(
+    userId: string,
+    sessionId: string,
+  ): Promise<{ session: VerificationSession | null; error: string | null }> {
+    const { data: session, error: fetchError } = await this.supabase
+      .getClient()
+      .from('verification_sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (fetchError || !session) {
+      return { session: null, error: 'Verification session not found' };
+    }
+
+    const existingSession = session as VerificationSession;
+
+    const terminalStatuses: VerificationStatus[] = [
+      VerificationStatus.COMPLETED,
+      VerificationStatus.FAILED,
+      VerificationStatus.EXPIRED,
+      VerificationStatus.CANCELLED,
+    ];
+
+    if (terminalStatuses.includes(existingSession.status)) {
+      return {
+        session: existingSession,
+        error: `Cannot cancel a session in "${existingSession.status}" state`,
+      };
+    }
+
+    const provider = this.providerFactory.getProvider({ provider: existingSession.provider });
+
+    try {
+      // Best-effort provider-side cancellation when supported.
+      if (existingSession.provider_session_id && typeof provider.cancelSession === 'function') {
+        await provider.cancelSession(existingSession.provider_session_id);
+      }
+
+      const now = new Date().toISOString();
+      const updates = {
+        status: VerificationStatus.CANCELLED,
+        cancelled_at: now,
+        updated_at: now,
+      };
+
+      await this.supabase
+        .getClient()
+        .from('verification_sessions')
+        .update(updates)
+        .eq('id', sessionId);
+
+      Object.assign(existingSession, updates);
+
+      return { session: existingSession, error: null };
+    } catch (err) {
+      return {
+        session: existingSession,
+        error: err instanceof Error ? err.message : 'Failed to cancel verification session',
+      };
+    }
   }
 
   async handleWebhook(

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IVerificationProvider, ProviderConfig } from './verification.provider';
 import { VerificationProvider } from '../dto/verification.dto';
@@ -9,57 +9,108 @@ export interface ProviderFactoryOptions {
   config?: ProviderConfig;
 }
 
+/**
+ * Central registry + resolver for identity verification providers.
+ *
+ * - Providers register themselves here (defaults are wired in the constructor;
+ *   additional providers can be added at runtime via {@link registerProvider}).
+ * - The active/default provider is configurable through the
+ *   `VERIFICATION_PROVIDER` environment variable (or application config),
+ *   allowing operators to switch vendors without touching core code.
+ * - Per-provider credentials are resolved from env using the convention
+ *   `<PROVIDER>_API_KEY`, `<PROVIDER>_API_SECRET`, `<PROVIDER>_BASE_URL`,
+ *   `<PROVIDER>_WEBHOOK_SECRET` (e.g. `SUMSUB_API_KEY`, `PERSONA_API_KEY`).
+ */
 @Injectable()
 export class VerificationProviderFactory {
-  private providers: Map<VerificationProvider, IVerificationProvider> = new Map();
+  private readonly logger = new Logger(VerificationProviderFactory.name);
+  private readonly providers = new Map<VerificationProvider, IVerificationProvider>();
 
-  constructor(private configService: ConfigService) {
+  constructor(private readonly configService: ConfigService) {
     this.registerDefaults();
   }
 
-  private registerDefaults() {
-    this.providers.set(VerificationProvider.MOCK, new MockVerificationProvider());
+  private registerDefaults(): void {
+    // The mock provider is always available so the abstraction is usable in
+    // local/dev/test environments without any external credentials.
+    this.registerProvider(new MockVerificationProvider());
   }
 
-  registerProvider(provider: IVerificationProvider) {
+  /**
+   * Register (or replace) a provider implementation. Concrete vendor providers
+   * (Sumsub, Persona, Veriff, Synaps, Stripe Identity, Alloy, ...) plug in here.
+   */
+  registerProvider(provider: IVerificationProvider): void {
     this.providers.set(provider.name, provider);
   }
 
+  /**
+   * Returns true when a provider has been registered for the given name.
+   */
+  hasProvider(provider: VerificationProvider): boolean {
+    return this.providers.has(provider);
+  }
+
+  /**
+   * The default provider name resolved from configuration.
+   * Falls back to MOCK when unset or unknown.
+   */
+  getDefaultProviderName(): VerificationProvider {
+    const configured =
+      this.configService.get<string>('VERIFICATION_PROVIDER') ??
+      this.configService.get<string>('DEFAULT_VERIFICATION_PROVIDER');
+
+    if (!configured) {
+      return VerificationProvider.MOCK;
+    }
+
+    const normalized = configured.toLowerCase() as VerificationProvider;
+    if (!Object.values(VerificationProvider).includes(normalized)) {
+      this.logger.warn(
+        `Unknown VERIFICATION_PROVIDER "${configured}", falling back to "${VerificationProvider.MOCK}"`,
+      );
+      return VerificationProvider.MOCK;
+    }
+
+    return normalized;
+  }
+
+  /**
+   * Resolve a configured provider instance. When no explicit provider is
+   * requested, the configured default is used.
+   */
   getProvider(options: ProviderFactoryOptions = {}): IVerificationProvider {
-    const providerName = options.provider || VerificationProvider.MOCK;
+    const providerName = options.provider ?? this.getDefaultProviderName();
     const provider = this.providers.get(providerName);
 
     if (!provider) {
       throw new Error(`Unsupported verification provider: ${providerName}`);
     }
 
-    const _config: ProviderConfig = {
-      apiKey:
-        options.config?.apiKey ||
-        this.configService.get<string>(`${providerName.toUpperCase()}_API_KEY`),
-      apiSecret:
-        options.config?.apiSecret ||
-        this.configService.get<string>(`${providerName.toUpperCase()}_API_SECRET`),
-      baseUrl:
-        options.config?.baseUrl ||
-        this.configService.get<string>(`${providerName.toUpperCase()}_BASE_URL`),
-      webhookSecret:
-        options.config?.webhookSecret ||
-        this.configService.get<string>(`${providerName.toUpperCase()}_WEBHOOK_SECRET`),
-      timeoutMs: options.config?.timeoutMs || 30000,
-    };
-
-    if (provider instanceof MockVerificationProvider) {
-      // Configure the existing mock provider instance instead of creating a new one
-      provider.configure({
-        // Note: We're not using the config directly in the mock provider for simplicity
-        // In a real implementation, you might want to use these values
-        // For now, we just return the configured instance
-      });
-      return provider;
+    // Apply resolved configuration if the provider supports it.
+    if (typeof provider.applyConfig === 'function') {
+      provider.applyConfig(this.resolveConfig(providerName, options.config));
     }
 
     return provider;
+  }
+
+  /**
+   * Resolve provider credentials from explicit overrides then environment.
+   */
+  private resolveConfig(
+    providerName: VerificationProvider,
+    overrides?: ProviderConfig,
+  ): ProviderConfig {
+    const prefix = providerName.toUpperCase();
+    return {
+      apiKey: overrides?.apiKey ?? this.configService.get<string>(`${prefix}_API_KEY`),
+      apiSecret: overrides?.apiSecret ?? this.configService.get<string>(`${prefix}_API_SECRET`),
+      baseUrl: overrides?.baseUrl ?? this.configService.get<string>(`${prefix}_BASE_URL`),
+      webhookSecret:
+        overrides?.webhookSecret ?? this.configService.get<string>(`${prefix}_WEBHOOK_SECRET`),
+      timeoutMs: overrides?.timeoutMs ?? 30000,
+    };
   }
 
   getSupportedProviders(): VerificationProvider[] {

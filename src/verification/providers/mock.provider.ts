@@ -5,6 +5,8 @@ import {
   VerificationProvider,
   ProviderCreateSessionResponse,
   ProviderStatusResponse,
+  ProviderVerificationResult,
+  ProviderCancelResponse,
   ProviderWebhookPayload,
   VerificationSubject,
 } from '../dto/verification.dto';
@@ -29,15 +31,30 @@ export class MockVerificationProvider implements IVerificationProvider {
     status: VerificationStatus.COMPLETED,
   };
 
+  private getResultsResponse: ProviderVerificationResult = {
+    status: VerificationStatus.COMPLETED,
+    result: {
+      score: 0.99,
+      risk_level: 'low',
+      breakdown: { document: 'clear', facial_similarity: 'clear' },
+    },
+    completed_at: new Date().toISOString(),
+  };
+
   private handleWebhookResponse: ProviderStatusResponse = {
     status: VerificationStatus.COMPLETED,
   };
+
+  applyConfig(config: ProviderConfig): void {
+    this.config = { ...this.config, ...config };
+  }
 
   configure(config: {
     shouldFail?: boolean;
     failOn?: 'create' | 'getStatus' | 'handleWebhook';
     createSessionResponse?: ProviderCreateSessionResponse;
     getStatusResponse?: ProviderStatusResponse;
+    getResultsResponse?: ProviderVerificationResult;
     handleWebhookResponse?: ProviderStatusResponse;
   }): this {
     if (config.shouldFail !== undefined) {
@@ -51,6 +68,9 @@ export class MockVerificationProvider implements IVerificationProvider {
     }
     if (config.getStatusResponse) {
       this.getStatusResponse = config.getStatusResponse;
+    }
+    if (config.getResultsResponse) {
+      this.getResultsResponse = config.getResultsResponse;
     }
     if (config.handleWebhookResponse) {
       this.handleWebhookResponse = config.handleWebhookResponse;
@@ -86,6 +106,22 @@ export class MockVerificationProvider implements IVerificationProvider {
     }
 
     return { ...this.getStatusResponse };
+  }
+
+  async getResults(_sessionId: string): Promise<ProviderVerificationResult> {
+    if (this.delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+    }
+
+    return { ...this.getResultsResponse };
+  }
+
+  async cancelSession(_sessionId: string): Promise<ProviderCancelResponse> {
+    if (this.delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+    }
+
+    return { cancelled: true, status: VerificationStatus.CANCELLED };
   }
 
   async handleWebhook(payload: ProviderWebhookPayload): Promise<ProviderStatusResponse> {

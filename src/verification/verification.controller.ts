@@ -1,10 +1,24 @@
-import { Body, Controller, Get, Param, Post, UseGuards, BadRequestException } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  UseGuards,
+  BadRequestException,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUserCtx } from '../auth/current-user.decorator';
 import { VerificationService } from './verification.service';
 import { WalletsService } from '../wallets/wallets.service';
-import { CreateVerificationSessionDto, VerificationType } from './dto/verification.dto';
+import {
+  CreateVerificationSessionDto,
+  VerificationProvider,
+  VerificationType,
+  type ProviderWebhookPayload,
+} from './dto/verification.dto';
 
 @ApiTags('verification')
 @ApiBearerAuth('bearer')
@@ -59,6 +73,44 @@ export class VerificationController {
     }
 
     return { session: result.session, error: null };
+  }
+
+  @Get('sessions/:id/results')
+  @UseGuards(JwtAuthGuard)
+  async getResults(@CurrentUser() user: AuthUserCtx, @Param('id') sessionId: string) {
+    const result = await this.verificationService.getResults(user.userId, sessionId);
+
+    if (result.error) {
+      throw new BadRequestException(result.error);
+    }
+
+    return { session: result.session, error: null };
+  }
+
+  @Delete('sessions/:id')
+  @UseGuards(JwtAuthGuard)
+  async cancelSession(@CurrentUser() user: AuthUserCtx, @Param('id') sessionId: string) {
+    const result = await this.verificationService.cancelSession(user.userId, sessionId);
+
+    if (result.error) {
+      throw new BadRequestException(result.error);
+    }
+
+    return { session: result.session, error: null };
+  }
+
+  @Post('webhooks/:provider')
+  async handleWebhook(
+    @Param('provider') provider: VerificationProvider,
+    @Body() payload: ProviderWebhookPayload,
+  ) {
+    const result = await this.verificationService.handleWebhook(provider, payload);
+
+    if (result.error) {
+      throw new BadRequestException(result.error);
+    }
+
+    return { handled: result.handled, error: null };
   }
 
   @Get('providers')
