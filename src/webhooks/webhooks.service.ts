@@ -5,6 +5,8 @@ import * as crypto from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
+import { MilestoneSyncWebhookHandler } from '../milestone-sync/milestone-sync-webhook.handler';
+import { TW_MILESTONE_EVENTS } from '../milestone-sync/milestone-sync.constants';
 import type { TrustlessWorkEventDto } from './dto/trustless-work-event.dto';
 
 const TW_EVENT_MAP: Record<string, string> = {
@@ -23,6 +25,7 @@ export class WebhooksService {
     private readonly eventEmitter: EventEmitter2,
     private readonly notifications: NotificationsService,
     private readonly config: ConfigService,
+    private readonly milestoneSyncHandler: MilestoneSyncWebhookHandler,
   ) {
     this.webhookSecret = this.config.get<string>('TRUSTLESS_WORK_WEBHOOK_SECRET', '');
   }
@@ -46,6 +49,15 @@ export class WebhooksService {
   async handleEvent(
     payload: TrustlessWorkEventDto,
   ): Promise<{ handled: boolean; reason?: string }> {
+    // Route milestone-level events to the sync handler
+    if ((TW_MILESTONE_EVENTS as readonly string[]).includes(payload.event)) {
+      return this.milestoneSyncHandler.handle({
+        event: payload.event,
+        contractId: payload.contractId,
+        data: payload.data as Record<string, unknown> | undefined,
+      });
+    }
+
     const targetStatus = TW_EVENT_MAP[payload.event];
 
     if (!targetStatus) {

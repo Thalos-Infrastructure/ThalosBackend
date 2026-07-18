@@ -6,6 +6,7 @@ import { LinkContractDto } from './dto/link-contract.dto';
 import { UpdateAgreementStatusDto } from './dto/update-status.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
 import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
+import { AgreementEventName } from '../events/agreement-events';
 
 @Injectable()
 export class AgreementsService {
@@ -241,7 +242,7 @@ export class AgreementsService {
     const { data: agreement, error: fetchError } = await this.supabase
       .getClient()
       .from('agreements')
-      .select('milestones')
+      .select('milestones, contract_id, title, asset, agreement_type')
       .eq('id', agreementId)
       .single();
 
@@ -291,6 +292,54 @@ export class AgreementsService {
       milestone_index: dto.milestone_index,
       milestone_description: milestones[dto.milestone_index].description,
     });
+
+    const contractId = (agreement as { contract_id: string | null }).contract_id ?? null;
+    const serviceType = (agreement as { agreement_type: string | null }).agreement_type ?? null;
+    const title = (agreement as { title: string }).title;
+    const asset = (agreement as { asset: string }).asset ?? 'USDC';
+    const ms = milestones[dto.milestone_index];
+
+    if (dto.status === 'approved') {
+      this.eventEmitter.emit(AgreementEventName.MilestoneApproved, {
+        agreementId,
+        agreementTitle: title,
+        milestoneIndex: dto.milestone_index,
+        milestoneDescription: ms.description,
+        milestoneAmount: ms.amount,
+        asset,
+        approvedByWallet: dto.actor_wallet,
+        contractId,
+        serviceType,
+      });
+    } else if (dto.status === 'released') {
+      this.eventEmitter.emit(AGREEMENT_EVENTS.MILESTONE_RELEASED, {
+        agreementId,
+        agreementTitle: title,
+        milestoneIndex: dto.milestone_index,
+        milestoneDescription: ms.description,
+        milestoneAmount: ms.amount,
+        asset,
+        contractId,
+        serviceType,
+        actorWallet: dto.actor_wallet,
+        evidence: dto.evidence_description,
+      });
+    }
+
+    if (emitsEvidence) {
+      this.eventEmitter.emit(AgreementEventName.EvidenceSubmitted, {
+        agreementId,
+        agreementTitle: title,
+        milestoneIndex: dto.milestone_index,
+        milestoneDescription: ms.description,
+        milestoneAmount: ms.amount,
+        asset,
+        submittedByWallet: dto.actor_wallet,
+        evidenceDescription: dto.evidence_description,
+        evidenceUrls: dto.evidence_urls,
+      });
+    }
+
     return { success: true, error: null };
   }
 
