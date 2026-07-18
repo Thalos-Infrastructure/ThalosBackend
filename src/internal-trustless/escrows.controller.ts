@@ -59,21 +59,46 @@ export class EscrowsController {
   }
 
   @Get('by-signer/:address')
-  async getEscrowsBySigner(@Param('address') address: string) {
-    const result = await relayToTrustless('GET', 'helper/get-escrows-by-signer', { address });
+  async getEscrowsBySigner(
+    @Param('address') address: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('validateOnChain') validateOnChain?: string,
+  ) {
+    // Trustless Work's helper expects `signer` (NOT `address`) plus pagination
+    // flags; sending `address` makes TW reject with "property address should not
+    // exist" (400), which used to force the frontend to fall back to calling TW
+    // directly. Defaults mirror the original frontend service.
+    const result = await relayToTrustless('GET', 'helper/get-escrows-by-signer', {
+      signer: address,
+      page: page ?? 1,
+      pageSize: pageSize ?? 5,
+      validateOnChain: validateOnChain ?? true,
+    });
     if (result.status >= 400) throw new BadRequestException(result.data);
     return result.data;
   }
 
+  // Trustless Work expects role values in camelCase (e.g. `serviceProvider`).
+  // The frontend/app uses snake_case, so normalize here — the backend owns the TW
+  // contract. Sending `service_provider` queries a non-existent `roles.service_provider`
+  // field and TW returns a misleading 500 "query requires an index".
+  private static readonly TW_ROLE_MAP: Record<string, string> = {
+    service_provider: 'serviceProvider',
+    release_signer: 'releaseSigner',
+    dispute_resolver: 'disputeResolver',
+  };
+
   @Get('by-role')
   async getEscrowsByRole(
     @Query('address') address: string,
-    @Query('role') role?: 'sender' | 'receiver' | 'approver',
+    @Query('role') role?: string,
     @Query('status') status?: string,
     @Query('type') type?: 'single-release' | 'multi-release',
   ) {
-    const query: Record<string, string> = { address };
-    if (role) query.role = role;
+    // TW's helper filters a role by `roleAddress` (NOT `address`).
+    const query: Record<string, string | number | boolean> = { roleAddress: address };
+    if (role) query.role = EscrowsController.TW_ROLE_MAP[role] ?? role;
     if (status) query.status = status;
     if (type) query.type = type;
     const result = await relayToTrustless('GET', 'helper/get-escrows-by-role', query);
