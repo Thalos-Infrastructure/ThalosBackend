@@ -96,7 +96,7 @@ export class WebhooksService {
         const message =
           error instanceof Error ? error.message :
           error && typeof error === 'object' && 'message' in error ?
-            String((error as { message: unknown }).message) :
+            String(error.message) :
             String(error);
         lastError = error instanceof Error ? error : new Error(message);
         if (attempt < this.maxRetries) {
@@ -108,7 +108,7 @@ export class WebhooksService {
         }
       }
     }
-    throw lastError;
+    throw lastError ?? new Error(`"${label}" failed after ${this.maxRetries} retries`);
   }
 
   private async processEvent(
