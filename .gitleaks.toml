@@ -1,0 +1,17 @@
+# gitleaks config for ThalosBackend
+# Extends the built-in rules; add project-specific allowlisting below.
+title = "ThalosBackend gitleaks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Project allowlist"
+# `.env.example` currently ships dev/example values. TODO: rotate those secrets and
+# replace them with placeholders, then remove this allowlist so the file is scanned too.
+paths = [
+  '''\.env\.example$''',
+  '''(^|/)node_modules/''',
+  '''(^|/)dist/''',
+  '''(^|/)coverage/''',
+]
