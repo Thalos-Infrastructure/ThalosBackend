@@ -1,4 +1,9 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SupabaseService } from '../supabase/supabase.service';
 import { CreateAgreementDto } from './dto/create-agreement.dto';
@@ -6,6 +11,11 @@ import { LinkContractDto } from './dto/link-contract.dto';
 import { UpdateAgreementStatusDto } from './dto/update-status.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
 import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
+import {
+  canTransition,
+  invalidTransitionMessage,
+  milestonesSatisfyCompletion,
+} from './agreement-lifecycle';
 
 @Injectable()
 export class AgreementsService {
@@ -175,6 +185,29 @@ export class AgreementsService {
     await this.assertCanAccessAgreement(userId, agreementId);
     await this.assertActorWallet(userId, dto.actor_wallet);
 
+    const { data: current, error: fetchError } = await this.supabase
+      .getClient()
+      .from('agreements')
+      .select('status, milestones, title, amount, asset')
+      .eq('id', agreementId)
+      .single();
+
+    if (fetchError || !current) {
+      return { success: false, error: fetchError?.message || 'Agreement not found' };
+    }
+
+    const fromStatus = current.status as string;
+
+    if (!canTransition(fromStatus, dto.status)) {
+      throw new BadRequestException(invalidTransitionMessage(fromStatus, dto.status));
+    }
+
+    if (dto.status === 'completed' && !milestonesSatisfyCompletion(current.milestones)) {
+      throw new BadRequestException(
+        'All milestones must be approved or released before the agreement can be completed',
+      );
+    }
+
     const updates: Record<string, unknown> = {
       status: dto.status,
       updated_at: new Date().toISOString(),
@@ -195,40 +228,26 @@ export class AgreementsService {
 
     await this.logActivity(agreementId, dto.actor_wallet, `status_changed_to_${dto.status}`, {
       status: dto.status,
+      from: fromStatus,
+      to: dto.status,
     });
 
     if (dto.status === 'funded') {
-      const { data: row } = await this.supabase
-        .getClient()
-        .from('agreements')
-        .select('title, amount, asset')
-        .eq('id', agreementId)
-        .single();
-      if (row) {
-        this.eventEmitter.emit(AGREEMENT_EVENTS.FUNDED, {
-          agreementId,
-          title: row.title,
-          amount: row.amount,
-          asset: row.asset ?? 'USDC',
-          fundedByWallet: dto.actor_wallet,
-        });
-      }
+      this.eventEmitter.emit(AGREEMENT_EVENTS.FUNDED, {
+        agreementId,
+        title: current.title,
+        amount: current.amount,
+        asset: current.asset ?? 'USDC',
+        fundedByWallet: dto.actor_wallet,
+      });
     } else if (dto.status === 'completed' || dto.status === 'resolved') {
-      const { data: row } = await this.supabase
-        .getClient()
-        .from('agreements')
-        .select('title, amount, asset')
-        .eq('id', agreementId)
-        .single();
-      if (row) {
-        this.eventEmitter.emit(AGREEMENT_EVENTS.COMPLETED, {
-          agreementId,
-          title: row.title,
-          totalAmount: row.amount,
-          asset: row.asset ?? 'USDC',
-          completedAt: new Date().toISOString(),
-        });
-      }
+      this.eventEmitter.emit(AGREEMENT_EVENTS.COMPLETED, {
+        agreementId,
+        title: current.title,
+        totalAmount: current.amount,
+        asset: current.asset ?? 'USDC',
+        completedAt: new Date().toISOString(),
+      });
     }
 
     return { success: true, error: null };

@@ -7,16 +7,33 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
 import type { TrustlessWorkEventDto } from './dto/trustless-work-event.dto';
 
-const TW_EVENT_MAP: Record<string, string> = {
-  'escrow.funded': 'funded',
-  'escrow.released': 'completed',
-  'escrow.disputed': 'disputed',
+interface EventConfig {
+  action: 'status_update' | 'milestone_update' | 'info';
+  targetStatus?: string;
+}
+
+const TW_EVENT_MAP: Record<string, EventConfig> = {
+  'escrow.funded': { action: 'status_update', targetStatus: 'funded' },
+  'escrow.released': { action: 'status_update', targetStatus: 'completed' },
+  'escrow.disputed': { action: 'status_update', targetStatus: 'disputed' },
+  'contract.completed': { action: 'status_update', targetStatus: 'completed' },
+  'contract.cancelled': { action: 'status_update', targetStatus: 'cancelled' },
+  'agreement.created': { action: 'info' },
+  'agreement.updated': { action: 'info' },
+  'agreement.milestone_updated': { action: 'milestone_update' },
+  'escrow.created': { action: 'info' },
+  'escrow.updated': { action: 'info' },
+  'escrow.milestone_updated': { action: 'milestone_update' },
+  'escrow.dispute_created': { action: 'status_update', targetStatus: 'disputed' },
+  'dispute.created': { action: 'status_update', targetStatus: 'disputed' },
 };
 
 @Injectable()
 export class WebhooksService {
   private readonly logger = new Logger(WebhooksService.name);
   private readonly webhookSecret: string;
+  private readonly maxRetries = 3;
+  private readonly baseRetryDelay = 1_000;
 
   constructor(
     private readonly supabase: SupabaseService,
@@ -46,13 +63,71 @@ export class WebhooksService {
   async handleEvent(
     payload: TrustlessWorkEventDto,
   ): Promise<{ handled: boolean; reason?: string }> {
-    const targetStatus = TW_EVENT_MAP[payload.event];
+    this.logger.log(`Incoming TW event: "${payload.event}" for contractId="${payload.contractId}"`);
 
-    if (!targetStatus) {
+    const config = TW_EVENT_MAP[payload.event];
+
+    if (!config) {
       this.logger.log(`Unhandled TW event type: "${payload.event}" — skipping`);
       return { handled: false, reason: 'unhandled_event_type' };
     }
 
+    try {
+      await this.withRetry(() => this.processEvent(payload, config), payload.event);
+      return { handled: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(
+        `Failed to process event "${payload.event}" for contractId="${payload.contractId}" ` +
+          `after ${this.maxRetries} retries — ${message}`,
+      );
+      return { handled: false, reason: 'processing_failed' };
+    }
+  }
+
+  private async withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (error: unknown) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : error && typeof error === 'object' && 'message' in error
+              ? String(error.message)
+              : String(error);
+        lastError = error instanceof Error ? error : new Error(message);
+        if (attempt < this.maxRetries) {
+          const delay = this.baseRetryDelay * 2 ** attempt;
+          this.logger.warn(
+            `Retrying "${label}" (attempt ${attempt + 1}/${this.maxRetries}) after ${delay}ms — ${lastError.message}`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+    }
+    throw lastError ?? new Error(`"${label}" failed after ${this.maxRetries} retries`);
+  }
+
+  private async processEvent(payload: TrustlessWorkEventDto, config: EventConfig): Promise<void> {
+    switch (config.action) {
+      case 'status_update':
+        await this.applyStatusUpdate(payload, config.targetStatus!);
+        break;
+      case 'milestone_update':
+        await this.applyMilestoneUpdate(payload);
+        break;
+      case 'info':
+        await this.applyInfoUpdate(payload);
+        break;
+    }
+  }
+
+  private async applyStatusUpdate(
+    payload: TrustlessWorkEventDto,
+    targetStatus: string,
+  ): Promise<void> {
     const updates: Record<string, unknown> = {
       status: targetStatus,
       updated_at: new Date().toISOString(),
@@ -60,8 +135,6 @@ export class WebhooksService {
     if (targetStatus === 'funded') updates.funded_at = new Date().toISOString();
     if (targetStatus === 'completed') updates.completed_at = new Date().toISOString();
 
-    // Atomic conditional update: only applies when status != targetStatus.
-    // Prevents double-processing if two identical webhooks arrive in parallel.
     const { data: updated, error: updateError } = await this.supabase
       .getClient()
       .from('agreements')
@@ -75,11 +148,10 @@ export class WebhooksService {
       this.logger.error(
         `DB update failed for contractId="${payload.contractId}": ${updateError.message}`,
       );
-      return { handled: false, reason: 'db_error' };
+      throw new Error(updateError.message);
     }
 
     if (!updated) {
-      // No row was modified — either agreement doesn't exist or status already matches.
       const { data: existing } = await this.supabase
         .getClient()
         .from('agreements')
@@ -89,13 +161,13 @@ export class WebhooksService {
 
       if (!existing) {
         this.logger.warn(`No agreement found for contractId="${payload.contractId}"`);
-        return { handled: false, reason: 'agreement_not_found' };
+        throw new Error(`Agreement not found for contractId="${payload.contractId}"`);
       }
 
       this.logger.log(
         `Idempotent duplicate: agreement ${(existing as { id: string }).id} already has status="${targetStatus}"`,
       );
-      return { handled: true, reason: 'already_applied' };
+      return;
     }
 
     const row = updated;
@@ -111,8 +183,90 @@ export class WebhooksService {
     );
 
     await this.dispatchNotification(targetStatus, row);
+  }
 
-    return { handled: true };
+  private async applyMilestoneUpdate(payload: TrustlessWorkEventDto): Promise<void> {
+    const { data: agreement, error: fetchError } = await this.supabase
+      .getClient()
+      .from('agreements')
+      .select('id, milestones')
+      .eq('contract_id', payload.contractId)
+      .maybeSingle();
+
+    if (fetchError || !agreement) {
+      this.logger.warn(
+        `No agreement found for milestone update: contractId="${payload.contractId}"`,
+      );
+      return;
+    }
+
+    const milestoneIndex =
+      payload.milestone?.index ?? (payload.data?.milestone_index as number | undefined);
+    if (milestoneIndex === undefined || milestoneIndex < 0) {
+      this.logger.warn(
+        `Milestone update missing milestone index for contractId="${payload.contractId}"`,
+      );
+      return;
+    }
+
+    const milestones = (agreement as { milestones: Array<Record<string, unknown>> }).milestones;
+    if (!milestones || milestoneIndex >= milestones.length) {
+      this.logger.warn(
+        `Invalid milestone index ${milestoneIndex} for contractId="${payload.contractId}"`,
+      );
+      return;
+    }
+
+    if (payload.milestone?.status) {
+      milestones[milestoneIndex].status = payload.milestone.status;
+    }
+    if (payload.milestone?.description) {
+      milestones[milestoneIndex].description = payload.milestone.description;
+    }
+
+    const { error: updateError } = await this.supabase
+      .getClient()
+      .from('agreements')
+      .update({ milestones, updated_at: new Date().toISOString() })
+      .eq('contract_id', payload.contractId);
+
+    if (updateError) {
+      this.logger.error(
+        `Milestone update failed for contractId="${payload.contractId}": ${updateError.message}`,
+      );
+      throw updateError;
+    }
+
+    await this.logActivity(agreement.id, 'trustless-work-webhook', 'webhook_milestone_updated', {
+      event: payload.event,
+      contractId: payload.contractId,
+      milestone_index: milestoneIndex,
+    });
+  }
+
+  private async applyInfoUpdate(payload: TrustlessWorkEventDto): Promise<void> {
+    const { data: agreement, error: fetchError } = await this.supabase
+      .getClient()
+      .from('agreements')
+      .select('id')
+      .eq('contract_id', payload.contractId)
+      .maybeSingle();
+
+    if (fetchError || !agreement) {
+      this.logger.log(`Info event for unknown contractId="${payload.contractId}" — logging anyway`);
+      return;
+    }
+
+    await this.logActivity(
+      agreement.id,
+      'trustless-work-webhook',
+      `webhook_event_${payload.event.replace('.', '_')}`,
+      {
+        event: payload.event,
+        contractId: payload.contractId,
+        data: payload.data,
+      },
+    );
   }
 
   private async dispatchNotification(

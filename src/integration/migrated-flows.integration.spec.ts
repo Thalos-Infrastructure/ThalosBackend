@@ -617,8 +617,9 @@ describe('migrated backend flows (integration)', () => {
       .expect(200)
       .expect(({ body }) => {
         expect(body).toEqual([{ contractId: CONTRACT_ID, status: 'active' }]);
+        // TW expects `signer` (not `address`) plus pagination flags — see escrows.controller.ts.
         expect(global.fetch).toHaveBeenCalledWith(
-          `https://trustless-work.test/helper/get-escrows-by-signer?address=${WALLET}`,
+          `https://trustless-work.test/helper/get-escrows-by-signer?signer=${WALLET}&page=1&pageSize=5&validateOnChain=true`,
           expect.objectContaining({
             method: 'GET',
             headers: expect.objectContaining({ 'x-api-key': 'tw-test-key' }),
