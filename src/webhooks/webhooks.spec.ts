@@ -524,7 +524,10 @@ describe('WebhooksController', () => {
     service.verifySignature.mockReturnValue(true);
     service.handleEvent.mockResolvedValue({ handled: true });
     const result = await controller.handleTrustlessWork(
-      req('{"event":"escrow.milestone_updated","contractId":"abc","milestone":{"index":0,"status":"completed"}}', 'sig'),
+      req(
+        '{"event":"escrow.milestone_updated","contractId":"abc","milestone":{"index":0,"status":"completed"}}',
+        'sig',
+      ),
       'sig',
     );
     expect(result).toEqual({ ok: true, reason: undefined });
