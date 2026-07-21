@@ -21,6 +21,7 @@ import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { AgreementsService } from './agreements.service';
+import { AgreementActivityService } from './agreement-activity.service';
 import { DisputesService } from '../disputes/disputes.service';
 import { UpdateAgreementStatusDto } from './dto/update-status.dto';
 import type { SupabaseService } from '../supabase/supabase.service';
@@ -392,9 +393,11 @@ describe('AgreementsService lifecycle enforcement (business rules)', () => {
   beforeEach(() => {
     db = new InMemoryDb();
     emit = jest.fn();
+    const activity = new AgreementActivityService(db as unknown as SupabaseService);
     service = new AgreementsService(
       db as unknown as SupabaseService,
       { emit } as unknown as EventEmitter2,
+      activity,
     );
   });
 
@@ -768,8 +771,9 @@ describe('Dispute flows drive the agreement lifecycle', () => {
     db = new InMemoryDb();
     emit = jest.fn();
     const emitter = { emit } as unknown as EventEmitter2;
-    agreements = new AgreementsService(db as unknown as SupabaseService, emitter);
-    disputes = new DisputesService(db as unknown as SupabaseService, agreements, emitter);
+    const activity = new AgreementActivityService(db as unknown as SupabaseService);
+    agreements = new AgreementsService(db as unknown as SupabaseService, emitter, activity);
+    disputes = new DisputesService(db as unknown as SupabaseService, agreements, emitter, activity);
 
     db.insert('agreements', {
       id: AGREEMENT_ID,
@@ -809,7 +813,17 @@ describe('Dispute flows drive the agreement lifecycle', () => {
     const disputeId = await openDispute();
 
     expect(db.agreement(AGREEMENT_ID).status).toBe('disputed');
+    // Shared side-effect path logs status_changed_to_* then dispute-specific action
     expect(db.activityFor(AGREEMENT_ID)).toEqual([
+      expect.objectContaining({
+        action: 'status_changed_to_disputed',
+        details: expect.objectContaining({
+          status: 'disputed',
+          from: 'active',
+          to: 'disputed',
+          dispute_id: disputeId,
+        }),
+      }),
       expect.objectContaining({
         action: 'dispute_opened',
         details: expect.objectContaining({ dispute_id: disputeId }),
@@ -877,8 +891,10 @@ describe('Dispute flows drive the agreement lifecycle', () => {
     expect(db.agreement(AGREEMENT_ID).status).toBe('resolved');
     expect(db.agreement(AGREEMENT_ID).completed_at).toBeDefined();
     expect(db.activityFor(AGREEMENT_ID).map((a) => a.action)).toEqual([
+      'status_changed_to_disputed',
       'dispute_opened',
       'dispute_resolver_assigned',
+      'status_changed_to_resolved',
       'dispute_resolved',
     ]);
 
