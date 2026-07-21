@@ -16,9 +16,6 @@ import { ManualIdentityProvider } from '../kyb/providers/manual-identity.provide
  * Real HTTP integration test for the KYB module: boots the actual Nest app
  * (global prefix, real ValidationPipe, real JwtAuthGuard/JwtStrategy) against
  * an in-memory fake of SupabaseService — no mocking at the service layer.
- * This is the "visual"/manual-test evidence for the security review: every
- * `it()` below is a real HTTP request/response you can also replay with curl
- * (see the printed `curl` reproduction in each test's console output).
  */
 
 type Row = Record<string, any>;
