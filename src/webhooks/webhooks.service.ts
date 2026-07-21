@@ -13,19 +13,19 @@ interface EventConfig {
 }
 
 const TW_EVENT_MAP: Record<string, EventConfig> = {
-  'escrow.funded':               { action: 'status_update', targetStatus: 'funded' },
-  'escrow.released':             { action: 'status_update', targetStatus: 'completed' },
-  'escrow.disputed':             { action: 'status_update', targetStatus: 'disputed' },
-  'contract.completed':          { action: 'status_update', targetStatus: 'completed' },
-  'contract.cancelled':          { action: 'status_update', targetStatus: 'cancelled' },
-  'agreement.created':           { action: 'info' },
-  'agreement.updated':           { action: 'info' },
+  'escrow.funded': { action: 'status_update', targetStatus: 'funded' },
+  'escrow.released': { action: 'status_update', targetStatus: 'completed' },
+  'escrow.disputed': { action: 'status_update', targetStatus: 'disputed' },
+  'contract.completed': { action: 'status_update', targetStatus: 'completed' },
+  'contract.cancelled': { action: 'status_update', targetStatus: 'cancelled' },
+  'agreement.created': { action: 'info' },
+  'agreement.updated': { action: 'info' },
   'agreement.milestone_updated': { action: 'milestone_update' },
-  'escrow.created':              { action: 'info' },
-  'escrow.updated':              { action: 'info' },
-  'escrow.milestone_updated':    { action: 'milestone_update' },
-  'escrow.dispute_created':      { action: 'status_update', targetStatus: 'disputed' },
-  'dispute.created':             { action: 'status_update', targetStatus: 'disputed' },
+  'escrow.created': { action: 'info' },
+  'escrow.updated': { action: 'info' },
+  'escrow.milestone_updated': { action: 'milestone_update' },
+  'escrow.dispute_created': { action: 'status_update', targetStatus: 'disputed' },
+  'dispute.created': { action: 'status_update', targetStatus: 'disputed' },
 };
 
 @Injectable()
@@ -63,9 +63,7 @@ export class WebhooksService {
   async handleEvent(
     payload: TrustlessWorkEventDto,
   ): Promise<{ handled: boolean; reason?: string }> {
-    this.logger.log(
-      `Incoming TW event: "${payload.event}" for contractId="${payload.contractId}"`,
-    );
+    this.logger.log(`Incoming TW event: "${payload.event}" for contractId="${payload.contractId}"`);
 
     const config = TW_EVENT_MAP[payload.event];
 
@@ -81,7 +79,7 @@ export class WebhooksService {
       const message = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(
         `Failed to process event "${payload.event}" for contractId="${payload.contractId}" ` +
-        `after ${this.maxRetries} retries — ${message}`,
+          `after ${this.maxRetries} retries — ${message}`,
       );
       return { handled: false, reason: 'processing_failed' };
     }
@@ -94,10 +92,11 @@ export class WebhooksService {
         return await fn();
       } catch (error: unknown) {
         const message =
-          error instanceof Error ? error.message :
-          error && typeof error === 'object' && 'message' in error ?
-            String((error as { message: unknown }).message) :
-            String(error);
+          error instanceof Error
+            ? error.message
+            : error && typeof error === 'object' && 'message' in error
+              ? String(error.message)
+              : String(error);
         lastError = error instanceof Error ? error : new Error(message);
         if (attempt < this.maxRetries) {
           const delay = this.baseRetryDelay * 2 ** attempt;
@@ -108,13 +107,10 @@ export class WebhooksService {
         }
       }
     }
-    throw lastError;
+    throw lastError ?? new Error(`"${label}" failed after ${this.maxRetries} retries`);
   }
 
-  private async processEvent(
-    payload: TrustlessWorkEventDto,
-    config: EventConfig,
-  ): Promise<void> {
+  private async processEvent(payload: TrustlessWorkEventDto, config: EventConfig): Promise<void> {
     switch (config.action) {
       case 'status_update':
         await this.applyStatusUpdate(payload, config.targetStatus!);
@@ -204,8 +200,8 @@ export class WebhooksService {
       return;
     }
 
-    const milestoneIndex = payload.milestone?.index ??
-      (payload.data?.milestone_index as number | undefined);
+    const milestoneIndex =
+      payload.milestone?.index ?? (payload.data?.milestone_index as number | undefined);
     if (milestoneIndex === undefined || milestoneIndex < 0) {
       this.logger.warn(
         `Milestone update missing milestone index for contractId="${payload.contractId}"`,
@@ -257,9 +253,7 @@ export class WebhooksService {
       .maybeSingle();
 
     if (fetchError || !agreement) {
-      this.logger.log(
-        `Info event for unknown contractId="${payload.contractId}" — logging anyway`,
-      );
+      this.logger.log(`Info event for unknown contractId="${payload.contractId}" — logging anyway`);
       return;
     }
 
