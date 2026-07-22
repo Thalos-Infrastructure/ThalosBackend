@@ -102,6 +102,9 @@ importers:
       jest:
         specifier: ^30.4.2
         version: 30.4.2(@types/node@22.20.0)
+      jest-environment-node:
+        specifier: ^30.4.1
+        version: 30.4.1
       jsonwebtoken:
         specifier: ^9.0.2
         version: 9.0.3

@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { WebhooksService } from './webhooks.service';
 import { WebhooksController } from './webhooks.controller';
+import { RetryJobType } from '../retry-queue/retry-queue.types';
 import type { Request } from 'express';
 
 const SECRET = 'test-webhook-secret-32chars-long!!';
@@ -22,9 +23,14 @@ interface MockDeps {
   secret?: string;
 }
 
-function buildService(
-  deps: MockDeps = {},
-): WebhooksService & { _emit: jest.Mock; _notifyDispute: jest.Mock } {
+type MockedWebhooksService = WebhooksService & {
+  _emit: jest.Mock;
+  _notifyDispute: jest.Mock;
+  _enqueue: jest.Mock;
+  _registerHandler: jest.Mock;
+};
+
+function buildService(deps: MockDeps = {}): MockedWebhooksService {
   const emit = deps.emit ?? jest.fn();
   const notifyDisputeOpened = deps.notifyDisputeOpened ?? jest.fn().mockResolvedValue(undefined);
 
@@ -40,16 +46,47 @@ function buildService(
       key === 'TRUSTLESS_WORK_WEBHOOK_SECRET' ? (deps.secret ?? SECRET) : def,
   };
 
+  let jobSeq = 0;
+  const registerHandler = jest.fn();
+  const enqueue = jest.fn().mockImplementation((jobType: string, payload: unknown) => ({
+    id: `job-${++jobSeq}`,
+    job_type: jobType,
+    payload,
+  }));
+  const retryQueue = { enqueue, registerHandler };
+
   const svc = new (WebhooksService as unknown as new (...args: unknown[]) => WebhooksService)(
     supabase,
     eventEmitter,
     notifications,
     config,
-  ) as WebhooksService & { _emit: jest.Mock; _notifyDispute: jest.Mock };
+    retryQueue,
+  ) as MockedWebhooksService;
 
   svc._emit = emit;
   svc._notifyDispute = notifyDisputeOpened;
+  svc._enqueue = enqueue;
+  svc._registerHandler = registerHandler;
+  svc.onModuleInit();
   return svc;
+}
+
+/**
+ * Mirrors what the shared retry queue does at runtime: enqueue the event, then run it
+ * through the handler that WebhooksService registered in onModuleInit. Lets the existing
+ * business-logic assertions (DB writes, emitted events, idempotent-duplicate handling)
+ * keep exercising the real processEvent() code path without waiting on a real poller.
+ */
+async function runHandleEventAndProcess(
+  svc: MockedWebhooksService,
+  payload: Record<string, unknown>,
+): Promise<{ handled: boolean; reason?: string }> {
+  const result = await svc.handleEvent(payload as never);
+  if (!result.handled) return result;
+  const [, jobPayload] = svc._enqueue.mock.calls[svc._enqueue.mock.calls.length - 1];
+  const [, handler] = svc._registerHandler.mock.calls[0];
+  await handler(jobPayload, 1);
+  return result;
 }
 
 // Supabase client stub for the atomic UPDATE path
@@ -144,7 +181,10 @@ describe('WebhooksService.handleEvent — status transitions', () => {
 
   it('escrow.funded → funded: updates DB and emits agreement.funded', async () => {
     const svc = buildService({ getClientCalls: [updateClient(row), insertClient()] });
-    const result = await svc.handleEvent({ event: 'escrow.funded', contractId: 'c-1' });
+    const result = await runHandleEventAndProcess(svc, {
+      event: 'escrow.funded',
+      contractId: 'c-1',
+    });
     expect(result).toEqual({ handled: true });
     expect(svc._emit).toHaveBeenCalledWith(
       'agreement.funded',
@@ -154,7 +194,10 @@ describe('WebhooksService.handleEvent — status transitions', () => {
 
   it('escrow.released → completed: updates DB and emits agreement.completed', async () => {
     const svc = buildService({ getClientCalls: [updateClient(row), insertClient()] });
-    const result = await svc.handleEvent({ event: 'escrow.released', contractId: 'c-2' });
+    const result = await runHandleEventAndProcess(svc, {
+      event: 'escrow.released',
+      contractId: 'c-2',
+    });
     expect(result).toEqual({ handled: true });
     expect(svc._emit).toHaveBeenCalledWith(
       'agreement.completed',
@@ -164,7 +207,10 @@ describe('WebhooksService.handleEvent — status transitions', () => {
 
   it('contract.completed → completed: updates DB and emits agreement.completed', async () => {
     const svc = buildService({ getClientCalls: [updateClient(row), insertClient()] });
-    const result = await svc.handleEvent({ event: 'contract.completed', contractId: 'c-2' });
+    const result = await runHandleEventAndProcess(svc, {
+      event: 'contract.completed',
+      contractId: 'c-2',
+    });
     expect(result).toEqual({ handled: true });
     expect(svc._emit).toHaveBeenCalledWith(
       'agreement.completed',
@@ -174,7 +220,10 @@ describe('WebhooksService.handleEvent — status transitions', () => {
 
   it('escrow.disputed → disputed: updates DB and calls notifyDisputeOpened', async () => {
     const svc = buildService({ getClientCalls: [updateClient(row), insertClient()] });
-    const result = await svc.handleEvent({ event: 'escrow.disputed', contractId: 'c-3' });
+    const result = await runHandleEventAndProcess(svc, {
+      event: 'escrow.disputed',
+      contractId: 'c-3',
+    });
     expect(result).toEqual({ handled: true });
     expect(svc._notifyDispute).toHaveBeenCalledWith(
       expect.objectContaining({ agreementId: 'agr-1' }),
@@ -183,7 +232,10 @@ describe('WebhooksService.handleEvent — status transitions', () => {
 
   it('dispute.created → disputed: updates DB and calls notifyDisputeOpened', async () => {
     const svc = buildService({ getClientCalls: [updateClient(row), insertClient()] });
-    const result = await svc.handleEvent({ event: 'dispute.created', contractId: 'c-3' });
+    const result = await runHandleEventAndProcess(svc, {
+      event: 'dispute.created',
+      contractId: 'c-3',
+    });
     expect(result).toEqual({ handled: true });
     expect(svc._notifyDispute).toHaveBeenCalledWith(
       expect.objectContaining({ agreementId: 'agr-1' }),
@@ -192,7 +244,10 @@ describe('WebhooksService.handleEvent — status transitions', () => {
 
   it('escrow.dispute_created → disputed: updates DB and calls notifyDisputeOpened', async () => {
     const svc = buildService({ getClientCalls: [updateClient(row), insertClient()] });
-    const result = await svc.handleEvent({ event: 'escrow.dispute_created', contractId: 'c-3' });
+    const result = await runHandleEventAndProcess(svc, {
+      event: 'escrow.dispute_created',
+      contractId: 'c-3',
+    });
     expect(result).toEqual({ handled: true });
     expect(svc._notifyDispute).toHaveBeenCalledWith(
       expect.objectContaining({ agreementId: 'agr-1' }),
@@ -201,7 +256,10 @@ describe('WebhooksService.handleEvent — status transitions', () => {
 
   it('contract.cancelled → cancelled: updates DB without notification', async () => {
     const svc = buildService({ getClientCalls: [updateClient(row), insertClient()] });
-    const result = await svc.handleEvent({ event: 'contract.cancelled', contractId: 'c-4' });
+    const result = await runHandleEventAndProcess(svc, {
+      event: 'contract.cancelled',
+      contractId: 'c-4',
+    });
     expect(result).toEqual({ handled: true });
     expect(svc._emit).not.toHaveBeenCalled();
     expect(svc._notifyDispute).not.toHaveBeenCalled();
@@ -209,7 +267,7 @@ describe('WebhooksService.handleEvent — status transitions', () => {
 
   it('funded path does not emit completed or call notifyDisputeOpened', async () => {
     const svc = buildService({ getClientCalls: [updateClient(row), insertClient()] });
-    await svc.handleEvent({ event: 'escrow.funded', contractId: 'c-1' });
+    await runHandleEventAndProcess(svc, { event: 'escrow.funded', contractId: 'c-1' });
     expect(svc._emit).not.toHaveBeenCalledWith('agreement.completed', expect.anything());
     expect(svc._notifyDispute).not.toHaveBeenCalled();
   });
@@ -235,7 +293,7 @@ describe('WebhooksService.handleEvent — milestone updates', () => {
         insertClient(),
       ],
     });
-    const result = await svc.handleEvent({
+    const result = await runHandleEventAndProcess(svc, {
       event: 'escrow.milestone_updated',
       contractId: 'c-1',
       milestone: { index: 0, status: 'completed' },
@@ -251,7 +309,7 @@ describe('WebhooksService.handleEvent — milestone updates', () => {
         insertClient(),
       ],
     });
-    const result = await svc.handleEvent({
+    const result = await runHandleEventAndProcess(svc, {
       event: 'agreement.milestone_updated',
       contractId: 'c-1',
       milestone: { index: 1, status: 'approved' },
@@ -267,7 +325,7 @@ describe('WebhooksService.handleEvent — milestone updates', () => {
         insertClient(),
       ],
     });
-    const result = await svc.handleEvent({
+    const result = await runHandleEventAndProcess(svc, {
       event: 'escrow.milestone_updated',
       contractId: 'c-1',
       data: { milestone_index: 0, status: 'completed' },
@@ -284,7 +342,7 @@ describe('WebhooksService.handleEvent — info events', () => {
     const svc = buildService({
       getClientCalls: [selectClient({ id: 'agr-1' }), insertClient()],
     });
-    const result = await svc.handleEvent({
+    const result = await runHandleEventAndProcess(svc, {
       event: 'agreement.created',
       contractId: 'c-1',
       data: { title: 'New Agreement' },
@@ -298,7 +356,7 @@ describe('WebhooksService.handleEvent — info events', () => {
     const svc = buildService({
       getClientCalls: [selectClient({ id: 'agr-1' }), insertClient()],
     });
-    const result = await svc.handleEvent({
+    const result = await runHandleEventAndProcess(svc, {
       event: 'agreement.updated',
       contractId: 'c-1',
     });
@@ -309,7 +367,10 @@ describe('WebhooksService.handleEvent — info events', () => {
     const svc = buildService({
       getClientCalls: [selectClient({ id: 'agr-1' }), insertClient()],
     });
-    const result = await svc.handleEvent({ event: 'escrow.created', contractId: 'c-1' });
+    const result = await runHandleEventAndProcess(svc, {
+      event: 'escrow.created',
+      contractId: 'c-1',
+    });
     expect(result).toEqual({ handled: true });
   });
 
@@ -317,7 +378,10 @@ describe('WebhooksService.handleEvent — info events', () => {
     const svc = buildService({
       getClientCalls: [selectClient({ id: 'agr-1' }), insertClient()],
     });
-    const result = await svc.handleEvent({ event: 'escrow.updated', contractId: 'c-1' });
+    const result = await runHandleEventAndProcess(svc, {
+      event: 'escrow.updated',
+      contractId: 'c-1',
+    });
     expect(result).toEqual({ handled: true });
   });
 
@@ -325,7 +389,10 @@ describe('WebhooksService.handleEvent — info events', () => {
     const svc = buildService({
       getClientCalls: [selectClient(null)],
     });
-    const result = await svc.handleEvent({ event: 'agreement.created', contractId: 'ghost' });
+    const result = await runHandleEventAndProcess(svc, {
+      event: 'agreement.created',
+      contractId: 'ghost',
+    });
     expect(result).toEqual({ handled: true });
   });
 });
@@ -337,14 +404,17 @@ describe('WebhooksService.handleEvent — idempotency', () => {
   it('returns handled for duplicate status (already_applied)', async () => {
     const existing = { id: 'agr-2', status: 'funded' };
     const svc = buildService({ getClientCalls: [updateClient(null), selectClient(existing)] });
-    const result = await svc.handleEvent({ event: 'escrow.funded', contractId: 'dup' });
+    const result = await runHandleEventAndProcess(svc, {
+      event: 'escrow.funded',
+      contractId: 'dup',
+    });
     expect(result).toEqual({ handled: true });
   });
 
   it('does NOT emit any event or call any notification on duplicate', async () => {
     const existing = { id: 'agr-2', status: 'funded' };
     const svc = buildService({ getClientCalls: [updateClient(null), selectClient(existing)] });
-    await svc.handleEvent({ event: 'escrow.funded', contractId: 'dup' });
+    await runHandleEventAndProcess(svc, { event: 'escrow.funded', contractId: 'dup' });
     expect(svc._emit).not.toHaveBeenCalled();
     expect(svc._notifyDispute).not.toHaveBeenCalled();
   });
@@ -362,89 +432,64 @@ describe('WebhooksService.handleEvent — edge cases', () => {
 });
 
 // ---------------------------------------------------------------------------
-// handleEvent — retry mechanism
+// handleEvent — delegates to the shared retry queue instead of retrying inline
 // ---------------------------------------------------------------------------
-describe('WebhooksService.handleEvent — retry mechanism', () => {
-  beforeEach(() => {
-    jest.useFakeTimers();
-  });
-
-  afterEach(() => {
-    jest.useRealTimers();
-  });
-
-  it('succeeds on first retry after a transient DB error', async () => {
-    const row = { id: 'agr-1', title: 'Test', amount: '100', asset: 'USDC' };
-
-    // Attempt 0 fails, attempt 1 succeeds
-    const failClient = updateClient(null, { message: 'timeout' });
-    const successClient = updateClient(row);
-    const logClient = insertClient();
-
-    const svc = buildService({
-      getClientCalls: [failClient, successClient, logClient],
-    });
-
-    const promise = svc.handleEvent({ event: 'escrow.funded', contractId: 'c-1' });
-
-    await jest.advanceTimersByTimeAsync(1000);
-
-    const result = await promise;
+describe('WebhooksService.handleEvent — shared retry queue integration', () => {
+  it('enqueues on the shared queue with jobType WEBHOOK_EVENT_PROCESSING and ACKs immediately', async () => {
+    const svc = buildService();
+    const result = await svc.handleEvent({ event: 'escrow.funded', contractId: 'c-1' });
     expect(result).toEqual({ handled: true });
-    expect(svc._emit).toHaveBeenCalledWith(
-      'agreement.funded',
-      expect.objectContaining({ agreementId: 'agr-1' }),
+    expect(svc._enqueue).toHaveBeenCalledTimes(1);
+    expect(svc._enqueue).toHaveBeenCalledWith(
+      RetryJobType.WEBHOOK_EVENT_PROCESSING,
+      expect.objectContaining({ payload: expect.objectContaining({ contractId: 'c-1' }) }),
+      expect.any(String),
+    );
+    // No DB interaction happens synchronously — that's the registered handler's job now.
+    expect(svc._emit).not.toHaveBeenCalled();
+  });
+
+  it('does not enqueue for an unmapped event type', async () => {
+    const svc = buildService();
+    await svc.handleEvent({ event: 'escrow.paused', contractId: 'c-1' });
+    expect(svc._enqueue).not.toHaveBeenCalled();
+  });
+
+  it('computes a deterministic idempotency key for the same payload', async () => {
+    const svc = buildService();
+    await svc.handleEvent({ event: 'escrow.funded', contractId: 'c-1' });
+    await svc.handleEvent({ event: 'escrow.funded', contractId: 'c-1' });
+    const [firstKey] = svc._enqueue.mock.calls[0].slice(2);
+    const [secondKey] = svc._enqueue.mock.calls[1].slice(2);
+    expect(firstKey).toBe(secondKey);
+  });
+
+  it('computes a different idempotency key for a different contractId', async () => {
+    const svc = buildService();
+    await svc.handleEvent({ event: 'escrow.funded', contractId: 'c-1' });
+    await svc.handleEvent({ event: 'escrow.funded', contractId: 'c-2' });
+    const [firstKey] = svc._enqueue.mock.calls[0].slice(2);
+    const [secondKey] = svc._enqueue.mock.calls[1].slice(2);
+    expect(firstKey).not.toBe(secondKey);
+  });
+
+  it('registers exactly one handler for WEBHOOK_EVENT_PROCESSING on module init', () => {
+    const svc = buildService();
+    expect(svc._registerHandler).toHaveBeenCalledTimes(1);
+    expect(svc._registerHandler).toHaveBeenCalledWith(
+      RetryJobType.WEBHOOK_EVENT_PROCESSING,
+      expect.any(Function),
     );
   });
 
-  it('fails after exhausting all retries', async () => {
-    const errClient = updateClient(null, { message: 'persistent error' });
-
-    // 4 attempts (0 initial + 3 retries), each needs one client
+  it('the registered handler rejects on a transient DB error, so the queue will retry it', async () => {
     const svc = buildService({
-      getClientCalls: [errClient, errClient, errClient, errClient],
+      getClientCalls: [updateClient(null, { message: 'timeout' })],
     });
-
-    const promise = svc.handleEvent({ event: 'escrow.funded', contractId: 'c-1' });
-
-    await jest.advanceTimersByTimeAsync(8000);
-
-    const result = await promise;
-    expect(result).toEqual({ handled: false, reason: 'processing_failed' });
-  });
-
-  it('returns processing_failed when agreement not found after retries', async () => {
-    // Each attempt: update returns null, select returns null → throws Error
-    // 4 attempts × 2 clients each = 8 total
-    const clients = [];
-    for (let i = 0; i < 4; i++) {
-      clients.push(updateClient(null));
-      clients.push(selectClient(null));
-    }
-
-    const svc = buildService({ getClientCalls: clients });
-
-    const promise = svc.handleEvent({ event: 'escrow.funded', contractId: 'ghost' });
-
-    await jest.advanceTimersByTimeAsync(8000);
-
-    const result = await promise;
-    expect(result).toEqual({ handled: false, reason: 'processing_failed' });
-  });
-
-  it('returns processing_failed when DB update consistently errors', async () => {
-    const errClient = updateClient(null, { message: 'connection lost' });
-
-    const svc = buildService({
-      getClientCalls: [errClient, errClient, errClient, errClient],
-    });
-
-    const promise = svc.handleEvent({ event: 'escrow.funded', contractId: 'err' });
-
-    await jest.advanceTimersByTimeAsync(8000);
-
-    const result = await promise;
-    expect(result).toEqual({ handled: false, reason: 'processing_failed' });
+    await svc.handleEvent({ event: 'escrow.funded', contractId: 'c-1' });
+    const [, jobPayload] = svc._enqueue.mock.calls[0];
+    const [, handler] = svc._registerHandler.mock.calls[0];
+    await expect(handler(jobPayload, 1)).rejects.toThrow('timeout');
   });
 });
 
@@ -524,7 +569,10 @@ describe('WebhooksController', () => {
     service.verifySignature.mockReturnValue(true);
     service.handleEvent.mockResolvedValue({ handled: true });
     const result = await controller.handleTrustlessWork(
-      req('{"event":"escrow.milestone_updated","contractId":"abc","milestone":{"index":0,"status":"completed"}}', 'sig'),
+      req(
+        '{"event":"escrow.milestone_updated","contractId":"abc","milestone":{"index":0,"status":"completed"}}',
+        'sig',
+      ),
       'sig',
     );
     expect(result).toEqual({ ok: true, reason: undefined });
@@ -550,13 +598,13 @@ describe('WebhooksController', () => {
     expect(result).toEqual({ ok: false, reason: 'unhandled_event_type' });
   });
 
-  it('returns { ok: false } when processing fails', async () => {
+  it('passes the reason through verbatim whatever the service returns', async () => {
     service.verifySignature.mockReturnValue(true);
-    service.handleEvent.mockResolvedValue({ handled: false, reason: 'processing_failed' });
+    service.handleEvent.mockResolvedValue({ handled: false, reason: 'unhandled_event_type' });
     const result = await controller.handleTrustlessWork(
       req('{"event":"escrow.funded","contractId":"abc"}', 'sig'),
       'sig',
     );
-    expect(result).toEqual({ ok: false, reason: 'processing_failed' });
+    expect(result).toEqual({ ok: false, reason: 'unhandled_event_type' });
   });
 });

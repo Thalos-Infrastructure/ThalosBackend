@@ -11,6 +11,26 @@ import type {
   ServiceType,
 } from './dto/escrow-write.dto';
 
+export interface RelayRequest {
+  path: string;
+  body: unknown;
+  // Index signature so this shape satisfies RetryQueueService.enqueue()'s
+  // `TPayload extends Record<string, unknown>` constraint.
+  [key: string]: unknown;
+}
+
+/** Thrown by relayWrite when Trustless Work responds with an error status. Preserves the
+ * upstream status so callers can tell a validation error (4xx, not worth retrying) apart
+ * from a transient failure (5xx, worth backing off with the shared retry queue). */
+export class TrustlessRelayError extends BadRequestException {
+  constructor(
+    public readonly upstreamStatus: number,
+    data: unknown,
+  ) {
+    super(data);
+  }
+}
+
 // Defaults de testnet (mismos que usa el frontend); sobreescribibles por env.
 const DEFAULT_PLATFORM_ADDRESS = 'GBTTKTSBLHGMRY3T65JXT423MHQZXTD26TTHQEY5HNF2KWFFDKKVHVPD';
 const DEFAULT_DISPUTE_RESOLVER = 'GB6MP3L6UGIDY6O6MXNLSKHLXT2T2TCMPZIZGUTOGYKOLHW7EORWMFCK';
@@ -89,14 +109,73 @@ function buildAgreementBody(dto: CreateEscrowDto) {
 
 /**
  * POST a Trustless Work y devuelve la respuesta tal cual (p. ej. { unsignedTransaction }).
- * Lanza BadRequestException si el upstream falla.
+ * Lanza TrustlessRelayError si el upstream falla (preserva el status para que el caller
+ * decida si vale la pena reintentar).
  */
-async function relayWrite(path: string, body: unknown): Promise<unknown> {
+export async function relayWrite(path: string, body: unknown): Promise<unknown> {
   const result = await relayToTrustless('POST', path, undefined, body);
   if (result.status >= 400) {
-    throw new BadRequestException(result.data);
+    throw new TrustlessRelayError(result.status, result.data);
   }
   return result.data;
+}
+
+/* =====================================================
+   REQUEST BUILDERS — separan "qué pedir" de "ejecutar el pedido" para que el
+   controller pueda interceptar fallos (backstop en la cola de retries) sin
+   duplicar la construcción de path/body.
+===================================================== */
+
+export function buildCreateEscrowRequest(dto: CreateEscrowDto): RelayRequest {
+  const path =
+    dto.serviceType === 'multi-release' ? 'deployer/multi-release' : 'deployer/single-release';
+  return { path, body: buildAgreementBody(dto) };
+}
+
+export function buildFundEscrowRequest(dto: FundEscrowDto): RelayRequest {
+  return {
+    path: `escrow/${dto.type}/fund-escrow`,
+    body: { contractId: dto.contractId, signer: dto.signer, amount: dto.amount },
+  };
+}
+
+export function buildApproveMilestoneRequest(dto: ApproveMilestoneDto): RelayRequest {
+  return {
+    path: `escrow/${dto.type}/approve-milestone`,
+    body: {
+      contractId: dto.contractId,
+      milestoneIndex: dto.milestoneIndex,
+      approver: dto.approver,
+    },
+  };
+}
+
+export function buildChangeMilestoneStatusRequest(dto: ChangeMilestoneStatusDto): RelayRequest {
+  return {
+    path: `escrow/${dto.type}/change-milestone-status`,
+    body: {
+      contractId: dto.contractId,
+      milestoneIndex: dto.milestoneIndex,
+      newEvidence: dto.newEvidence,
+      newStatus: dto.newStatus,
+      serviceProvider: dto.serviceProvider,
+    },
+  };
+}
+
+export function buildReleaseFundsRequest(dto: ReleaseFundsDto): RelayRequest {
+  const path =
+    dto.type === 'single-release'
+      ? `escrow/${dto.type}/release-funds`
+      : `escrow/${dto.type}/release-milestone-funds`;
+  return {
+    path,
+    body: {
+      contractId: dto.contractId,
+      releaseSigner: dto.releaseSigner,
+      milestoneIndex: dto.milestoneIndex,
+    },
+  };
 }
 
 /* =====================================================
@@ -104,47 +183,28 @@ async function relayWrite(path: string, body: unknown): Promise<unknown> {
 ===================================================== */
 
 export function createEscrow(dto: CreateEscrowDto): Promise<unknown> {
-  const path =
-    dto.serviceType === 'multi-release' ? 'deployer/multi-release' : 'deployer/single-release';
-  return relayWrite(path, buildAgreementBody(dto));
+  const { path, body } = buildCreateEscrowRequest(dto);
+  return relayWrite(path, body);
 }
 
 export function fundEscrow(dto: FundEscrowDto): Promise<unknown> {
-  return relayWrite(`escrow/${dto.type}/fund-escrow`, {
-    contractId: dto.contractId,
-    signer: dto.signer,
-    amount: dto.amount,
-  });
+  const { path, body } = buildFundEscrowRequest(dto);
+  return relayWrite(path, body);
 }
 
 export function approveMilestone(dto: ApproveMilestoneDto): Promise<unknown> {
-  return relayWrite(`escrow/${dto.type}/approve-milestone`, {
-    contractId: dto.contractId,
-    milestoneIndex: dto.milestoneIndex,
-    approver: dto.approver,
-  });
+  const { path, body } = buildApproveMilestoneRequest(dto);
+  return relayWrite(path, body);
 }
 
 export function changeMilestoneStatus(dto: ChangeMilestoneStatusDto): Promise<unknown> {
-  return relayWrite(`escrow/${dto.type}/change-milestone-status`, {
-    contractId: dto.contractId,
-    milestoneIndex: dto.milestoneIndex,
-    newEvidence: dto.newEvidence,
-    newStatus: dto.newStatus,
-    serviceProvider: dto.serviceProvider,
-  });
+  const { path, body } = buildChangeMilestoneStatusRequest(dto);
+  return relayWrite(path, body);
 }
 
 export function releaseFunds(dto: ReleaseFundsDto): Promise<unknown> {
-  const path =
-    dto.type === 'single-release'
-      ? `escrow/${dto.type}/release-funds`
-      : `escrow/${dto.type}/release-milestone-funds`;
-  return relayWrite(path, {
-    contractId: dto.contractId,
-    releaseSigner: dto.releaseSigner,
-    milestoneIndex: dto.milestoneIndex,
-  });
+  const { path, body } = buildReleaseFundsRequest(dto);
+  return relayWrite(path, body);
 }
 
 export function disputeMilestone(dto: DisputeMilestoneDto): Promise<unknown> {

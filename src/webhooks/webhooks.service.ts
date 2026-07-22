@@ -1,10 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
+import { RetryQueueService } from '../retry-queue/retry-queue.service';
+import { RetryJobType } from '../retry-queue/retry-queue.types';
 import type { TrustlessWorkEventDto } from './dto/trustless-work-event.dto';
 
 interface EventConfig {
@@ -12,36 +14,51 @@ interface EventConfig {
   targetStatus?: string;
 }
 
+type WebhookJobPayload = {
+  payload: TrustlessWorkEventDto;
+  config: EventConfig;
+  // Index signature so this shape satisfies RetryQueueService.enqueue()'s
+  // `TPayload extends Record<string, unknown>` constraint.
+  [key: string]: unknown;
+};
+
 const TW_EVENT_MAP: Record<string, EventConfig> = {
-  'escrow.funded':               { action: 'status_update', targetStatus: 'funded' },
-  'escrow.released':             { action: 'status_update', targetStatus: 'completed' },
-  'escrow.disputed':             { action: 'status_update', targetStatus: 'disputed' },
-  'contract.completed':          { action: 'status_update', targetStatus: 'completed' },
-  'contract.cancelled':          { action: 'status_update', targetStatus: 'cancelled' },
-  'agreement.created':           { action: 'info' },
-  'agreement.updated':           { action: 'info' },
+  'escrow.funded': { action: 'status_update', targetStatus: 'funded' },
+  'escrow.released': { action: 'status_update', targetStatus: 'completed' },
+  'escrow.disputed': { action: 'status_update', targetStatus: 'disputed' },
+  'contract.completed': { action: 'status_update', targetStatus: 'completed' },
+  'contract.cancelled': { action: 'status_update', targetStatus: 'cancelled' },
+  'agreement.created': { action: 'info' },
+  'agreement.updated': { action: 'info' },
   'agreement.milestone_updated': { action: 'milestone_update' },
-  'escrow.created':              { action: 'info' },
-  'escrow.updated':              { action: 'info' },
-  'escrow.milestone_updated':    { action: 'milestone_update' },
-  'escrow.dispute_created':      { action: 'status_update', targetStatus: 'disputed' },
-  'dispute.created':             { action: 'status_update', targetStatus: 'disputed' },
+  'escrow.created': { action: 'info' },
+  'escrow.updated': { action: 'info' },
+  'escrow.milestone_updated': { action: 'milestone_update' },
+  'escrow.dispute_created': { action: 'status_update', targetStatus: 'disputed' },
+  'dispute.created': { action: 'status_update', targetStatus: 'disputed' },
 };
 
 @Injectable()
-export class WebhooksService {
+export class WebhooksService implements OnModuleInit {
   private readonly logger = new Logger(WebhooksService.name);
   private readonly webhookSecret: string;
-  private readonly maxRetries = 3;
-  private readonly baseRetryDelay = 1_000;
 
   constructor(
     private readonly supabase: SupabaseService,
     private readonly eventEmitter: EventEmitter2,
     private readonly notifications: NotificationsService,
     private readonly config: ConfigService,
+    private readonly retryQueue: RetryQueueService,
   ) {
     this.webhookSecret = this.config.get<string>('TRUSTLESS_WORK_WEBHOOK_SECRET', '');
+  }
+
+  onModuleInit(): void {
+    // The retry queue's poller drives every attempt from here on — see enqueue() below.
+    this.retryQueue.registerHandler<WebhookJobPayload>(
+      RetryJobType.WEBHOOK_EVENT_PROCESSING,
+      (job) => this.processEvent(job.payload, job.config),
+    );
   }
 
   verifySignature(rawBody: Buffer, signatureHeader: string): boolean {
@@ -63,9 +80,7 @@ export class WebhooksService {
   async handleEvent(
     payload: TrustlessWorkEventDto,
   ): Promise<{ handled: boolean; reason?: string }> {
-    this.logger.log(
-      `Incoming TW event: "${payload.event}" for contractId="${payload.contractId}"`,
-    );
+    this.logger.log(`Incoming TW event: "${payload.event}" for contractId="${payload.contractId}"`);
 
     const config = TW_EVENT_MAP[payload.event];
 
@@ -74,47 +89,29 @@ export class WebhooksService {
       return { handled: false, reason: 'unhandled_event_type' };
     }
 
-    try {
-      await this.withRetry(() => this.processEvent(payload, config), payload.event);
-      return { handled: true };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(
-        `Failed to process event "${payload.event}" for contractId="${payload.contractId}" ` +
-        `after ${this.maxRetries} retries — ${message}`,
-      );
-      return { handled: false, reason: 'processing_failed' };
-    }
+    // Enqueue and ACK immediately — the shared retry queue's poller drives the actual
+    // attempts (with backoff/persistence), so we don't hold this HTTP request open.
+    const idempotencyKey = this.buildIdempotencyKey(payload);
+    await this.retryQueue.enqueue<WebhookJobPayload>(
+      RetryJobType.WEBHOOK_EVENT_PROCESSING,
+      { payload, config },
+      idempotencyKey,
+    );
+    return { handled: true };
   }
 
-  private async withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
-    let lastError: Error | null = null;
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-      try {
-        return await fn();
-      } catch (error: unknown) {
-        const message =
-          error instanceof Error ? error.message :
-          error && typeof error === 'object' && 'message' in error ?
-            String((error as { message: unknown }).message) :
-            String(error);
-        lastError = error instanceof Error ? error : new Error(message);
-        if (attempt < this.maxRetries) {
-          const delay = this.baseRetryDelay * 2 ** attempt;
-          this.logger.warn(
-            `Retrying "${label}" (attempt ${attempt + 1}/${this.maxRetries}) after ${delay}ms — ${lastError.message}`,
-          );
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-      }
-    }
-    throw lastError;
+  // Trustless Work webhook payloads carry no event id, so duplicate deliveries of the
+  // same event are deduped by hashing the payload itself.
+  private buildIdempotencyKey(payload: TrustlessWorkEventDto): string {
+    const hash = crypto
+      .createHash('sha256')
+      .update(JSON.stringify(payload))
+      .digest('hex')
+      .slice(0, 16);
+    return `webhook:${payload.contractId}:${payload.event}:${hash}`;
   }
 
-  private async processEvent(
-    payload: TrustlessWorkEventDto,
-    config: EventConfig,
-  ): Promise<void> {
+  private async processEvent(payload: TrustlessWorkEventDto, config: EventConfig): Promise<void> {
     switch (config.action) {
       case 'status_update':
         await this.applyStatusUpdate(payload, config.targetStatus!);
@@ -204,8 +201,8 @@ export class WebhooksService {
       return;
     }
 
-    const milestoneIndex = payload.milestone?.index ??
-      (payload.data?.milestone_index as number | undefined);
+    const milestoneIndex =
+      payload.milestone?.index ?? (payload.data?.milestone_index as number | undefined);
     if (milestoneIndex === undefined || milestoneIndex < 0) {
       this.logger.warn(
         `Milestone update missing milestone index for contractId="${payload.contractId}"`,
@@ -257,9 +254,7 @@ export class WebhooksService {
       .maybeSingle();
 
     if (fetchError || !agreement) {
-      this.logger.log(
-        `Info event for unknown contractId="${payload.contractId}" — logging anyway`,
-      );
+      this.logger.log(`Info event for unknown contractId="${payload.contractId}" — logging anyway`);
       return;
     }
 

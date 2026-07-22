@@ -16,6 +16,7 @@ import { ProfilesModule } from './profiles/profiles.module';
 import { WalletsModule } from './wallets/wallets.module';
 import { EventsModule } from './events/events.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { RetryQueueModule } from './retry-queue/retry-queue.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     CommonModule,
     SupabaseModule,
     AuthModule,
+    RetryQueueModule,
     InternalTrustlessModule,
     AgreementsModule,
     UsersModule,
