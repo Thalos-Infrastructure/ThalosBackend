@@ -6,10 +6,29 @@ on:
   pull_request:
     branches: [main, master, develop]
 
+# Cancel superseded runs for the same branch/PR to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  lint-and-format:
-    name: Lint & Format
+  # Format / Lint / Test / Build run as independent parallel jobs so a failure in
+  # one (e.g. formatting) no longer hides the others — you see every failure at once.
+  checks:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Format
+            cmd: pnpm run format:check
+          - name: Lint
+            cmd: pnpm run lint:check
+          - name: Test
+            cmd: pnpm exec jest --runInBand
+          - name: Build
+            cmd: pnpm run build
 
     steps:
       - name: Checkout
@@ -27,11 +46,68 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check formatting
-        run: pnpm run format:check
+      - name: ${{ matrix.name }}
+        run: ${{ matrix.cmd }}
 
-      - name: Lint
-        run: pnpm run lint:check
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Test
-        run: pnpm exec jest --runInBand
+      # License-free run via the official image (the gitleaks-action requires a
+      # license for GitHub orgs). Scans the working tree (--no-git), not history,
+      # so it blocks NEW secrets committed in a PR without flagging old history.
+      - name: Run gitleaks
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/repo" \
+            zricethezav/gitleaks:v8.18.4 detect \
+            --source=/repo \
+            --no-git \
+            --redact \
+            --verbose \
+            --config=/repo/.gitleaks.toml
+
+  coverage:
+    name: Coverage (report only)
+    runs-on: ubuntu-latest
+    # Non-blocking: reports the coverage % but never fails the run / blocks a merge.
+    # (No coverageThreshold is set in jest.config, so coverage alone can't fail.)
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests with coverage
+        run: pnpm exec jest --runInBand --coverage --coverageReporters=text-summary --coverageReporters=lcov 2>&1 | tee coverage.log
+
+      - name: Publish coverage to job summary
+        if: always()
+        run: |
+          {
+            echo '## 🧪 Test coverage (report only — non-blocking)'
+            echo '```'
+            grep -E "Statements|Branches|Functions|Lines" coverage.log || echo "(coverage summary not found)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          if-no-files-found: ignore

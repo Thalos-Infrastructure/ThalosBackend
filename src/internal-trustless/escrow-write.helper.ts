@@ -148,6 +148,14 @@ export function releaseFunds(dto: ReleaseFundsDto): Promise<unknown> {
 }
 
 export function disputeMilestone(dto: DisputeMilestoneDto): Promise<unknown> {
+  // TW splits dispute by escrow type: single-release disputes the whole escrow
+  // (no milestone), multi-release disputes a specific milestone.
+  if (dto.type === 'single-release') {
+    return relayWrite('escrow/single-release/dispute-escrow', {
+      contractId: dto.contractId,
+      signer: dto.signer,
+    });
+  }
   return relayWrite('escrow/multi-release/dispute-milestone', {
     contractId: dto.contractId,
     milestoneIndex: dto.milestoneIndex,
