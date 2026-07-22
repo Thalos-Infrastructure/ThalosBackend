@@ -14,25 +14,12 @@ jest.mock('./trustless-relay.helper');
 const mockedRelay = relayHelper.relayToTrustless as jest.Mock;
 
 const SIGNER = 'GSIGNER0000000000000000000000000000000000000000000000000';
-const USER_ID = 'user-1';
-
-function supabaseStub() {
-  const chain: Record<string, jest.Mock> = {};
-  ['from', 'select', 'eq'].forEach((m) => {
-    chain[m] = jest.fn().mockReturnValue(chain);
-  });
-  chain.maybeSingle = jest.fn().mockResolvedValue({
-    data: { wallet_public_key: SIGNER },
-    error: null,
-  });
-  return { getClient: () => chain };
-}
 
 function buildController() {
   const enqueue = jest.fn().mockResolvedValue({ id: 'job-1' });
   const registerHandler = jest.fn();
   const retryQueue = { enqueue, registerHandler };
-  const controller = new EscrowsController(supabaseStub() as never, retryQueue as never);
+  const controller = new EscrowsController(retryQueue as never);
   controller.onModuleInit();
   return { controller, enqueue, registerHandler };
 }
@@ -40,8 +27,6 @@ function buildController() {
 function twResponse(status: number, data: unknown = {}) {
   return Promise.resolve({ status, data });
 }
-
-const user = { userId: USER_ID } as never;
 
 describe('EscrowsController — retry queue backstop', () => {
   beforeEach(() => {
@@ -58,7 +43,7 @@ describe('EscrowsController — retry queue backstop', () => {
       amount: 100,
       type: 'single-release',
     };
-    const result = await controller.fundEscrow(user, dto);
+    const result = await controller.fundEscrow(dto);
 
     expect(result).toEqual({ unsignedTransaction: 'xdr' });
     expect(enqueue).not.toHaveBeenCalled();
@@ -74,7 +59,7 @@ describe('EscrowsController — retry queue backstop', () => {
       type: 'single-release',
     };
 
-    await expect(controller.releaseFunds(user, dto)).rejects.toMatchObject({
+    await expect(controller.releaseFunds(dto)).rejects.toMatchObject({
       response: { error: 'unavailable' },
     });
     expect(enqueue).toHaveBeenCalledTimes(1);
@@ -96,7 +81,7 @@ describe('EscrowsController — retry queue backstop', () => {
       type: 'single-release',
     };
 
-    await expect(controller.fundEscrow(user, dto)).rejects.toThrow('ECONNRESET');
+    await expect(controller.fundEscrow(dto)).rejects.toThrow('ECONNRESET');
     expect(enqueue).toHaveBeenCalledTimes(1);
     expect(enqueue).toHaveBeenCalledWith(
       RetryJobType.PAYMENT_EXECUTION,
@@ -116,7 +101,7 @@ describe('EscrowsController — retry queue backstop', () => {
       type: 'single-release',
     };
 
-    await expect(controller.approveMilestone(user, dto)).rejects.toMatchObject({
+    await expect(controller.approveMilestone(dto)).rejects.toMatchObject({
       response: { message: 'invalid milestone index' },
     });
     expect(enqueue).not.toHaveBeenCalled();
@@ -141,8 +126,8 @@ describe('EscrowsController — retry queue backstop', () => {
       type: 'single-release',
     };
 
-    await expect(controller.approveMilestone(user, approveDto)).rejects.toBeDefined();
-    await expect(controller.changeMilestoneStatus(user, changeDto)).rejects.toBeDefined();
+    await expect(controller.approveMilestone(approveDto)).rejects.toBeDefined();
+    await expect(controller.changeMilestoneStatus(changeDto)).rejects.toBeDefined();
 
     expect(enqueue).toHaveBeenCalledTimes(2);
     const [firstJobType, , firstKey] = enqueue.mock.calls[0];
@@ -167,7 +152,7 @@ describe('EscrowsController — retry queue backstop', () => {
       milestones: [{ description: 'm1' }],
     };
 
-    await expect(controller.createEscrow(user, dto)).rejects.toBeDefined();
+    await expect(controller.createEscrow(dto)).rejects.toBeDefined();
     expect(enqueue).toHaveBeenCalledTimes(1);
     const [jobType, payload, key] = enqueue.mock.calls[0];
     expect(jobType).toBe(RetryJobType.AGREEMENT_CREATION);

@@ -7,7 +7,13 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
   const origin = process.env.THALOS_CORS_ORIGIN;
   app.enableCors({
-    origin: origin ? origin.split(',').map((o) => o.trim()) : true,
+    // Accept both comma- and semicolon-separated lists; ignore blanks/whitespace.
+    origin: origin
+      ? origin
+          .split(/[,;]/)
+          .map((o) => o.trim())
+          .filter(Boolean)
+      : true,
     credentials: true,
   });
   app.setGlobalPrefix('v1');
