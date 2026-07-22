@@ -340,7 +340,13 @@ describe('migrated backend flows (integration)', () => {
     supabase = new InMemorySupabase();
     const moduleRef = await Test.createTestingModule({
       imports: [AuthModule],
-      controllers: [AgreementsController, AgreementChatController, DisputesController, EscrowsController, WalletsController],
+      controllers: [
+        AgreementsController,
+        AgreementChatController,
+        DisputesController,
+        EscrowsController,
+        WalletsController,
+      ],
       providers: [
         AgreementsService,
         AgreementChatService,
@@ -654,9 +660,8 @@ describe('migrated backend flows (integration)', () => {
   });
 
   it('enforces participant creation on agreement create and rejects if it fails', async () => {
-    const newAgreementId = `550e8400-e29b-41d4-a716-44665544020${1}`;
     let createdAgreementId: string;
-    
+
     await request(app.getHttpServer())
       .post('/v1/agreements')
       .set(auth())
@@ -718,7 +723,6 @@ describe('migrated backend flows (integration)', () => {
 
   it('creator can send a message with sender_id and participants receive it', async () => {
     // Create a new agreement for this test with proper participants
-    let testAgreementId = '';
     const createRes = await request(app.getHttpServer())
       .post('/v1/agreements')
       .set(auth())
@@ -732,7 +736,7 @@ describe('migrated backend flows (integration)', () => {
         ],
       });
     expect(createRes.status).toBe(201);
-    testAgreementId = createRes.body.agreement.id;
+    const testAgreementId = createRes.body.agreement.id;
 
     const messageText = `Test message from creator at ${Date.now()}`;
     let messageId: string;
@@ -770,7 +774,6 @@ describe('migrated backend flows (integration)', () => {
 
   it('participant can send a message and creator receives it', async () => {
     // Create a new agreement for this test
-    let testAgreementId = '';
     const createRes = await request(app.getHttpServer())
       .post('/v1/agreements')
       .set(auth())
@@ -784,7 +787,7 @@ describe('migrated backend flows (integration)', () => {
         ],
       });
     expect(createRes.status).toBe(201);
-    testAgreementId = createRes.body.agreement.id;
+    const testAgreementId = createRes.body.agreement.id;
 
     const messageText = `Test message from participant at ${Date.now()}`;
     let messageId: string;
