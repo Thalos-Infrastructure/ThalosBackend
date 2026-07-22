@@ -1,3 +1,4 @@
+import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
 import type {
   AgreementCompletedData,
   AgreementCreatedData,
@@ -8,15 +9,18 @@ import type {
   MilestoneApprovedData,
 } from '../notifications/types/notification-data.types';
 
-/** Central registry of agreement domain event names. */
+/**
+ * Typed registry of agreement domain event names.
+ * Values are sourced from the canonical AGREEMENT_EVENTS constants.
+ */
 export const AgreementEventName = {
-  Created: 'agreement.created',
-  Funded: 'agreement.funded',
-  Completed: 'agreement.completed',
-  EvidenceSubmitted: 'evidence.submitted',
-  MilestoneApproved: 'milestone.approved',
-  DisputeOpened: 'dispute.opened',
-  DisputeResolved: 'dispute.resolved',
+  Created: AGREEMENT_EVENTS.CREATED,
+  Funded: AGREEMENT_EVENTS.FUNDED,
+  Completed: AGREEMENT_EVENTS.COMPLETED,
+  EvidenceSubmitted: AGREEMENT_EVENTS.EVIDENCE_SUBMITTED,
+  MilestoneApproved: AGREEMENT_EVENTS.MILESTONE_APPROVED,
+  DisputeOpened: AGREEMENT_EVENTS.DISPUTE_OPENED,
+  DisputeResolved: AGREEMENT_EVENTS.DISPUTE_RESOLVED,
 } as const;
 
 export type AgreementEventName = (typeof AgreementEventName)[keyof typeof AgreementEventName];
