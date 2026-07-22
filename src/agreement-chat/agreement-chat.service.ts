@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { SendMessageDto } from './dto/agreement-chat.dto';
 
@@ -48,13 +48,16 @@ export class AgreementChatService {
     const createdBy = (agreement as { created_by: string }).created_by;
     if (createdBy === wallet || createdBy === userId) return;
 
-    const { data: parts } = await this.supabase
+    const { data: parts, error: partErr } = await this.supabase
       .getClient()
       .from('agreement_participants')
       .select('wallet_address')
       .eq('agreement_id', agreementId)
       .eq('wallet_address', wallet)
       .limit(1);
+    if (partErr) {
+      throw new BadRequestException(`Failed to verify participant status: ${partErr.message}`);
+    }
     if (!parts?.length) {
       throw new ForbiddenException('Not a participant of this agreement');
     }
@@ -71,7 +74,7 @@ export class AgreementChatService {
       .order('created_at', { ascending: true });
 
     if (error) {
-      return { messages: [], error: error.message };
+      throw new BadRequestException(`Failed to retrieve messages: ${error.message}`);
     }
 
     return { messages: (data as AgreementMessage[]) || [], error: null };
@@ -82,7 +85,7 @@ export class AgreementChatService {
     await this.assertActorWallet(userId, dto.sender_wallet);
 
     if (!dto.message.trim()) {
-      return { message: null, error: 'Message cannot be empty' };
+      throw new BadRequestException('Message cannot be empty');
     }
 
     const { data, error } = await this.supabase
@@ -98,7 +101,7 @@ export class AgreementChatService {
       .single();
 
     if (error) {
-      return { message: null, error: error.message };
+      throw new BadRequestException(`Failed to send message: ${error.message}`);
     }
 
     return { message: data as AgreementMessage, error: null };

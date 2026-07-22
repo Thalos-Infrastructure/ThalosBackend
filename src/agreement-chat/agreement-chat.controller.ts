@@ -13,12 +13,12 @@ export class AgreementChatController {
   constructor(private readonly chat: AgreementChatService) {}
 
   @Get(':agreementId/messages')
-  getMessages(@CurrentUser() user: AuthUserCtx, @Param('agreementId') agreementId: string) {
+  async getMessages(@CurrentUser() user: AuthUserCtx, @Param('agreementId') agreementId: string) {
     return this.chat.getMessages(user.userId, agreementId);
   }
 
   @Post(':agreementId/messages')
-  sendMessage(
+  async sendMessage(
     @CurrentUser() user: AuthUserCtx,
     @Param('agreementId') agreementId: string,
     @Body() dto: Omit<SendMessageDto, 'agreement_id'>,
