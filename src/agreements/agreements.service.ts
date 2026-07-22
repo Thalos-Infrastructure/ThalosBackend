@@ -11,11 +11,12 @@ import { LinkContractDto } from './dto/link-contract.dto';
 import { UpdateAgreementStatusDto } from './dto/update-status.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
 import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
+import { milestonesSatisfyCompletion } from './agreement-lifecycle';
 import {
-  canTransition,
-  invalidTransitionMessage,
-  milestonesSatisfyCompletion,
-} from './agreement-lifecycle';
+  validateAgreement,
+  validateTransition,
+  validateAgreementConsistency,
+} from './agreement.validator';
 
 @Injectable()
 export class AgreementsService {
@@ -89,6 +90,11 @@ export class AgreementsService {
   }
 
   async create(userId: string, dto: CreateAgreementDto) {
+    const validation = validateAgreement(dto);
+    if (!validation.success) {
+      return { agreement: null, error: validation.error };
+    }
+
     await this.assertActorWallet(userId, dto.created_by);
 
     const createdByProfileId = await this.profileIdByWallet(dto.created_by);
@@ -216,8 +222,9 @@ export class AgreementsService {
 
     const fromStatus = current.status as string;
 
-    if (!canTransition(fromStatus, dto.status)) {
-      throw new BadRequestException(invalidTransitionMessage(fromStatus, dto.status));
+    const transitionValidation = validateTransition(fromStatus, dto.status);
+    if (!transitionValidation.success) {
+      throw new BadRequestException({ success: false, error: transitionValidation.error });
     }
 
     if (dto.status === 'completed' && !milestonesSatisfyCompletion(current.milestones)) {
@@ -330,6 +337,22 @@ export class AgreementsService {
       .eq('id', agreementId);
 
     if (updateError) return { success: false, error: updateError.message };
+
+    const { data: refreshed } = await this.supabase
+      .getClient()
+      .from('agreements')
+      .select('amount, milestones, agreement_type')
+      .eq('id', agreementId)
+      .single();
+    if (refreshed) {
+      const consistency = validateAgreementConsistency(refreshed as Parameters<typeof validateAgreementConsistency>[0]);
+      if (!consistency.success) {
+        console.warn(
+          `[AgreementsService] Agreement ${agreementId} has consistency issues after milestone update:`,
+          JSON.stringify(consistency.error),
+        );
+      }
+    }
 
     await this.logActivity(
       agreementId,

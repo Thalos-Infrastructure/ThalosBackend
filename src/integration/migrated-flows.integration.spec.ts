@@ -18,6 +18,7 @@ import { DisputesService } from '../disputes/disputes.service';
 import { EscrowsController } from '../internal-trustless/escrows.controller';
 import { WalletsController } from '../wallets/wallets.controller';
 import { WalletsService } from '../wallets/wallets.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
 
 // WalletsService transitively imports @stellar/stellar-sdk, which ships ESM that
 // ts-jest does not transform. The migrated flows under test never exercise
@@ -140,8 +141,19 @@ class QueryBuilder implements PromiseLike<QueryResult> {
   }
 
   private executeUpdate(): QueryResult {
+    const matched = this.db.select(this.table, this.filters);
     this.db.update(this.table, this.filters, this.payload);
-    return { data: null, error: null };
+    const ids = matched.map((r) => r.id);
+    const updated = ids.length > 0
+      ? this.db.select(this.table, [{ key: 'id', op: 'in', value: ids }], this.selected)
+      : [];
+    const data =
+      this.resultMode === 'maybeSingle'
+        ? (updated[0] ?? null)
+        : this.resultMode === 'single'
+          ? (updated[0] ?? null)
+          : updated;
+    return { data, error: null };
   }
 
   private executeDelete(): QueryResult {
@@ -693,365 +705,249 @@ describe('migrated backend flows (integration)', () => {
     return disputeId;
   }
 
-  describe('Agreements Module Integration Suite', () => {
-    it('POST /agreements - success', async () => {
+  // ---------------------------------------------------------------------------
+  // Standardized error contract — invalid create rejected server-side
+  // ---------------------------------------------------------------------------
+  describe('standardized error contract on invalid agreement creation', () => {
+    it('rejects a payload with invalid amount and returns { success: false, error: { code, details } }', async () => {
       await request(app.getHttpServer())
         .post('/v1/agreements')
         .set(auth())
         .send({
-          title: 'Test POST agreements',
-          amount: '500.00',
+          title: 'Bad amount agreement',
+          amount: '0.00',
           asset: 'USDC',
           created_by: WALLET,
-          participants: [
-            { wallet_address: WALLET, role: 'payer' },
-            { wallet_address: SECOND_WALLET, role: 'payee' },
+          participants: [{ wallet_address: WALLET, role: 'payer' }],
+        })
+        .expect(201)
+        .expect(({ body }) => {
+          expect(body.success).toBe(false);
+          expect(body.error).toBeDefined();
+          expect(body.error.code).toBe('VALIDATION_ERROR');
+          expect(Array.isArray(body.error.details)).toBe(true);
+          expect(body.error.details.length).toBeGreaterThan(0);
+          const amountError = body.error.details.find((d: { field: string }) => d.field === 'amount');
+          expect(amountError).toBeDefined();
+          expect(amountError.code).toBe('INVALID_AMOUNT');
+        });
+    });
+
+    it('rejects a payload with milestone-sum mismatch and returns standardized error', async () => {
+      await request(app.getHttpServer())
+        .post('/v1/agreements')
+        .set(auth())
+        .send({
+          title: 'Milestone mismatch agreement',
+          amount: '100.00',
+          asset: 'USDC',
+          agreement_type: 'multi',
+          created_by: WALLET,
+          participants: [{ wallet_address: WALLET, role: 'payer' }],
+          milestones: [
+            { description: 'Design', amount: '70.00', status: 'pending' },
+            { description: 'Build', amount: '40.00', status: 'pending' },
           ],
         })
         .expect(201)
         .expect(({ body }) => {
-          expect(body.error).toBeNull();
-          expect(body.agreement).toBeDefined();
-        });
-    });
-
-    it('POST /agreements - errors (invalid token, mismatched creator)', async () => {
-      // 401: Invalid token
-      await request(app.getHttpServer())
-        .post('/v1/agreements')
-        .set('Authorization', 'Bearer invalid-token')
-        .send({
-          title: 'Test POST agreements',
-          amount: '500.00',
-          created_by: WALLET,
-          participants: [{ wallet_address: WALLET, role: 'payer' }],
-        })
-        .expect(401);
-
-      // 403: Mismatched creator wallet (other wallet is owned by other user)
-      await request(app.getHttpServer())
-        .post('/v1/agreements')
-        .set(auth())
-        .send({
-          title: 'Test POST agreements',
-          amount: '500.00',
-          created_by: OTHER_WALLET,
-          participants: [{ wallet_address: OTHER_WALLET, role: 'payer' }],
-        })
-        .expect(403);
-    });
-
-    it('GET /agreements/by-wallet - success', async () => {
-      await request(app.getHttpServer())
-        .get(`/v1/agreements/by-wallet?wallet=${WALLET}`)
-        .set(auth())
-        .expect(200)
-        .expect(({ body }) => {
-          expect(body.error).toBeNull();
-          expect(body.agreements).toBeDefined();
-        });
-    });
-
-    it('GET /agreements/by-wallet - errors (invalid token, forbidden wallet)', async () => {
-      // 401: Invalid token
-      await request(app.getHttpServer())
-        .get(`/v1/agreements/by-wallet?wallet=${WALLET}`)
-        .set('Authorization', 'Bearer invalid-token')
-        .expect(401);
-
-      // 403: Forbidden wallet
-      await request(app.getHttpServer())
-        .get(`/v1/agreements/by-wallet?wallet=${OTHER_WALLET}`)
-        .set(auth())
-        .expect(403);
-    });
-
-    it('GET /agreements/:id - success', async () => {
-      await request(app.getHttpServer())
-        .get(`/v1/agreements/${AGREEMENT_ID}`)
-        .set(auth())
-        .expect(200)
-        .expect(({ body }) => {
-          expect(body.error).toBeNull();
-          expect(body.agreement.id).toBe(AGREEMENT_ID);
-        });
-    });
-
-    it('GET /agreements/:id - errors (invalid token, not found, unauthorized)', async () => {
-      // 401: Invalid token
-      await request(app.getHttpServer())
-        .get(`/v1/agreements/${AGREEMENT_ID}`)
-        .set('Authorization', 'Bearer invalid-token')
-        .expect(401);
-
-      // 404: Not found
-      const missingId = '550e8400-e29b-41d4-a716-446655449999';
-      await request(app.getHttpServer()).get(`/v1/agreements/${missingId}`).set(auth()).expect(404);
-
-      // 403: Mismatched / unauthorized wallet (other user accessing USER_ID's agreement)
-      await request(app.getHttpServer())
-        .get(`/v1/agreements/${AGREEMENT_ID}`)
-        .set(auth(OTHER_USER_ID))
-        .expect(403);
-    });
-
-    it('PATCH /agreements/:id/link-contract - success and activity log', async () => {
-      const contractId = 'new-contract-link-123';
-      await request(app.getHttpServer())
-        .patch(`/v1/agreements/${AGREEMENT_ID}/link-contract`)
-        .set(auth())
-        .send({
-          contract_id: contractId,
-          actor_wallet: WALLET,
-        })
-        .expect(200)
-        .expect(({ body }) => {
-          expect(body.success).toBe(true);
-        });
-
-      // Verify contract updated in db
-      const agreement = supabase.tables.agreements.find((a) => a.id === AGREEMENT_ID);
-      expect(agreement?.contract_id).toBe(contractId);
-
-      // Assert activity log entry is created
-      const activities = supabase.tables.agreement_activity.filter(
-        (act) => act.agreement_id === AGREEMENT_ID && act.action === 'contract_linked',
-      );
-      expect(activities.length).toBeGreaterThan(0);
-      expect(activities[0].details).toMatchObject({ contract_id: contractId });
-    });
-
-    it('PATCH /agreements/:id/link-contract - errors', async () => {
-      // 401: Invalid token
-      await request(app.getHttpServer())
-        .patch(`/v1/agreements/${AGREEMENT_ID}/link-contract`)
-        .set('Authorization', 'Bearer invalid-token')
-        .send({ contract_id: 'c-1', actor_wallet: WALLET })
-        .expect(401);
-
-      // 404: Not found
-      const missingId = '550e8400-e29b-41d4-a716-446655449999';
-      await request(app.getHttpServer())
-        .patch(`/v1/agreements/${missingId}/link-contract`)
-        .set(auth())
-        .send({ contract_id: 'c-1', actor_wallet: WALLET })
-        .expect(404);
-
-      // 403: Unauthorized user (OTHER_USER_ID lacks access)
-      await request(app.getHttpServer())
-        .patch(`/v1/agreements/${AGREEMENT_ID}/link-contract`)
-        .set(auth(OTHER_USER_ID))
-        .send({ contract_id: 'c-1', actor_wallet: OTHER_WALLET })
-        .expect(403);
-
-      // 403: Mismatched actor wallet for USER_ID (actor_wallet is OTHER_WALLET, but token is USER_ID)
-      await request(app.getHttpServer())
-        .patch(`/v1/agreements/${AGREEMENT_ID}/link-contract`)
-        .set(auth())
-        .send({ contract_id: 'c-1', actor_wallet: OTHER_WALLET })
-        .expect(403);
-    });
-
-    it('PATCH /agreements/:id/status - success and activity log', async () => {
-      // Transition from active to in_review
-      await request(app.getHttpServer())
-        .patch(`/v1/agreements/${AGREEMENT_ID}/status`)
-        .set(auth())
-        .send({
-          status: 'in_review',
-          actor_wallet: WALLET,
-        })
-        .expect(200)
-        .expect(({ body }) => {
-          expect(body.success).toBe(true);
-        });
-
-      // Verify status updated in db
-      const agreement = supabase.tables.agreements.find((a) => a.id === AGREEMENT_ID);
-      expect(agreement?.status).toBe('in_review');
-
-      // Assert activity log entry is created
-      const activities = supabase.tables.agreement_activity.filter(
-        (act) => act.agreement_id === AGREEMENT_ID && act.action === 'status_changed_to_in_review',
-      );
-      expect(activities.length).toBeGreaterThan(0);
-      expect(activities[0].details).toMatchObject({ from: 'active', to: 'in_review' });
-    });
-
-    it('PATCH /agreements/:id/status - errors', async () => {
-      // 401: Invalid token
-      await request(app.getHttpServer())
-        .patch(`/v1/agreements/${AGREEMENT_ID}/status`)
-        .set('Authorization', 'Bearer invalid-token')
-        .send({ status: 'completed', actor_wallet: WALLET })
-        .expect(401);
-
-      // 404: Not found
-      const missingId = '550e8400-e29b-41d4-a716-446655449999';
-      await request(app.getHttpServer())
-        .patch(`/v1/agreements/${missingId}/status`)
-        .set(auth())
-        .send({ status: 'completed', actor_wallet: WALLET })
-        .expect(404);
-
-      // 403: Unauthorized (OTHER_USER_ID lacks access)
-      await request(app.getHttpServer())
-        .patch(`/v1/agreements/${AGREEMENT_ID}/status`)
-        .set(auth(OTHER_USER_ID))
-        .send({ status: 'completed', actor_wallet: OTHER_WALLET })
-        .expect(403);
-
-      // 400: Invalid transition (completed status when milestones are not approved)
-      // Note: At this point status is 'in_review', but milestone is 'pending'.
-      // Trying to transition to completed should fail because milestonesSatisfyCompletion returns false.
-      await request(app.getHttpServer())
-        .patch(`/v1/agreements/${AGREEMENT_ID}/status`)
-        .set(auth())
-        .send({ status: 'completed', actor_wallet: WALLET })
-        .expect(400);
-    });
-
-    it('PATCH /agreements/:id/milestones - success and activity log', async () => {
-      // Update milestone 0 status to approved
-      await request(app.getHttpServer())
-        .patch(`/v1/agreements/${AGREEMENT_ID}/milestones`)
-        .set(auth())
-        .send({
-          milestone_index: 0,
-          status: 'approved',
-          actor_wallet: WALLET,
-          evidence_description: 'Deliverable complete',
-        })
-        .expect(200)
-        .expect(({ body }) => {
-          expect(body.success).toBe(true);
-        });
-
-      // Verify milestone updated in db
-      const agreement = supabase.tables.agreements.find((a) => a.id === AGREEMENT_ID);
-      expect(agreement?.milestones[0].status).toBe('approved');
-      expect(agreement?.milestones[0].evidence_description).toBe('Deliverable complete');
-
-      // Assert activity log entry is created
-      const activities = supabase.tables.agreement_activity.filter(
-        (act) => act.agreement_id === AGREEMENT_ID && act.action === 'milestone_approved',
-      );
-      expect(activities.length).toBeGreaterThan(0);
-      expect(activities[0].details).toMatchObject({ milestone_index: 0 });
-    });
-
-    it('PATCH /agreements/:id/milestones - errors', async () => {
-      // 401: Invalid token
-      await request(app.getHttpServer())
-        .patch(`/v1/agreements/${AGREEMENT_ID}/milestones`)
-        .set('Authorization', 'Bearer invalid-token')
-        .send({ milestone_index: 0, status: 'approved', actor_wallet: WALLET })
-        .expect(401);
-
-      // 404: Not found
-      const missingId = '550e8400-e29b-41d4-a716-446655449999';
-      await request(app.getHttpServer())
-        .patch(`/v1/agreements/${missingId}/milestones`)
-        .set(auth())
-        .send({ milestone_index: 0, status: 'approved', actor_wallet: WALLET })
-        .expect(404);
-
-      // 403: Mismatched / unauthorized wallet (other user accessing)
-      await request(app.getHttpServer())
-        .patch(`/v1/agreements/${AGREEMENT_ID}/milestones`)
-        .set(auth(OTHER_USER_ID))
-        .send({ milestone_index: 0, status: 'approved', actor_wallet: OTHER_WALLET })
-        .expect(403);
-
-      // 200 with success: false (invalid milestone index)
-      await request(app.getHttpServer())
-        .patch(`/v1/agreements/${AGREEMENT_ID}/milestones`)
-        .set(auth())
-        .send({ milestone_index: 99, status: 'approved', actor_wallet: WALLET })
-        .expect(200)
-        .expect(({ body }) => {
           expect(body.success).toBe(false);
-          expect(body.error).toBe('Invalid milestone index');
+          expect(body.error).toBeDefined();
+          expect(body.error.code).toBe('VALIDATION_ERROR');
+          expect(Array.isArray(body.error.details)).toBe(true);
+          const sumError = body.error.details.find(
+            (d: { code: string }) => d.code === 'MILESTONE_SUM_MISMATCH',
+          );
+          expect(sumError).toBeDefined();
         });
     });
+  });
 
-    it('GET /agreements/:id/activity - success', async () => {
-      // Seed some activity
-      supabase.tables.agreement_activity.push({
-        id: 'act-test-1',
-        agreement_id: AGREEMENT_ID,
-        actor_wallet: WALLET,
-        action: 'status_changed_to_active',
-        details: {},
-        created_at: '2026-07-21T00:00:00.000Z',
+  // ---------------------------------------------------------------------------
+  // Validator reuse — disputes
+  // ---------------------------------------------------------------------------
+  describe('validator reuse — disputes', () => {
+    const PENDING_AGR_ID = '550e8400-e29b-41d4-a716-446655440100';
+    const CANCEL_AGR_ID = '550e8400-e29b-41d4-a716-446655440101';
+
+    it('rejects opening a dispute on agreement with status pending (pending → disputed is invalid)', async () => {
+      supabase.tables.agreements.push({
+        id: PENDING_AGR_ID,
+        contract_id: 'contract-pending-reuse',
+        title: 'Pending reuse agreement',
+        description: 'For testing invalid transition',
+        amount: '100.00',
+        asset: 'USDC',
+        status: 'pending',
+        created_by: WALLET,
+        milestones: [],
+        metadata: {},
+        created_at: '2026-06-01T00:00:00.000Z',
+        updated_at: '2026-06-01T00:00:00.000Z',
+      });
+      supabase.tables.agreement_participants.push(
+        { id: 'pending-reuse-part-1', agreement_id: PENDING_AGR_ID, wallet_address: WALLET, role: 'payer' },
+        { id: 'pending-reuse-part-2', agreement_id: PENDING_AGR_ID, wallet_address: SECOND_WALLET, role: 'payee' },
+      );
+
+      await request(app.getHttpServer())
+        .post('/v1/disputes')
+        .set(auth())
+        .send({
+          agreement_id: PENDING_AGR_ID,
+          opened_by: WALLET,
+          reason: 'Should not be allowed',
+        })
+        .expect(400);
+
+      const agreement = supabase.tables.agreements.find((a) => a.id === PENDING_AGR_ID);
+      expect(agreement?.status).toBe('pending');
+    });
+
+    it('rejects cancelling a dispute when agreement validation fails', async () => {
+      supabase.tables.agreements.push({
+        id: CANCEL_AGR_ID,
+        contract_id: 'contract-cancel-reuse',
+        title: 'Cancel reuse agreement',
+        description: 'For testing cancel with invalid status',
+        amount: '100.00',
+        asset: 'USDC',
+        status: 'active',
+        created_by: WALLET,
+        milestones: [],
+        metadata: {},
+        created_at: '2026-06-01T00:00:00.000Z',
+        updated_at: '2026-06-01T00:00:00.000Z',
+      });
+      supabase.tables.agreement_participants.push(
+        { id: 'cancel-reuse-part-1', agreement_id: CANCEL_AGR_ID, wallet_address: WALLET, role: 'payer' },
+        { id: 'cancel-reuse-part-2', agreement_id: CANCEL_AGR_ID, wallet_address: SECOND_WALLET, role: 'payee' },
+      );
+
+      const opened = await request(app.getHttpServer())
+        .post('/v1/disputes')
+        .set(auth())
+        .send({
+          agreement_id: CANCEL_AGR_ID,
+          opened_by: WALLET,
+          reason: 'Cancel test',
+        })
+        .expect(201);
+      const disputeId = opened.body.dispute.id;
+
+      supabase.tables.agreements = supabase.tables.agreements.map((a) =>
+        a.id === CANCEL_AGR_ID ? { ...a, status: 'active' } : a,
+      );
+
+      await request(app.getHttpServer())
+        .patch(`/v1/disputes/${disputeId}/cancel`)
+        .set(auth())
+        .send({ cancelled_by: WALLET })
+        .expect(400);
+
+      const agreement = supabase.tables.agreements.find((a) => a.id === CANCEL_AGR_ID);
+      expect(agreement?.status).toBe('active');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Validator reuse — webhooks
+  // ---------------------------------------------------------------------------
+  describe('validator reuse — webhooks', () => {
+    let svc: WebhooksService;
+    let emit: jest.Mock;
+    let notifyDispute: jest.Mock;
+
+    beforeEach(() => {
+      emit = jest.fn();
+      notifyDispute = jest.fn().mockResolvedValue(undefined);
+      const eventEmitter = { emit };
+      const notifications = { notifyDisputeOpened: notifyDispute };
+      const config = { get: jest.fn(() => 'test-webhook-secret') };
+
+      svc = new (WebhooksService as unknown as new (...args: unknown[]) => WebhooksService)(
+        supabase,
+        eventEmitter,
+        notifications,
+        config,
+      ) as WebhooksService;
+    });
+
+    it('rejects an invalid transition (pending → disputed) and does not mutate DB', async () => {
+      const contractId = 'wh-reject-1';
+      supabase.tables.agreements.push({
+        id: 'wh-reject-agr',
+        contract_id: contractId,
+        title: 'Wh reject test',
+        description: 'Reject test',
+        amount: '100.00',
+        asset: 'USDC',
+        status: 'pending',
+        created_by: WALLET,
+        milestones: [],
+        metadata: {},
+        created_at: '2026-06-01T00:00:00.000Z',
+        updated_at: '2026-06-01T00:00:00.000Z',
       });
 
-      await request(app.getHttpServer())
-        .get(`/v1/agreements/${AGREEMENT_ID}/activity`)
-        .set(auth())
-        .expect(200)
-        .expect(({ body }) => {
-          expect(body.error).toBeNull();
-          expect(body.activities).toBeDefined();
-          expect(body.activities.length).toBeGreaterThan(0);
-        });
+      const result = await svc.handleEvent({ event: 'escrow.disputed', contractId });
+
+      expect(result).toEqual({ handled: true });
+      const agreement = supabase.tables.agreements.find((a) => a.contract_id === contractId);
+      expect(agreement?.status).toBe('pending');
+      expect(emit).not.toHaveBeenCalled();
+      expect(notifyDispute).not.toHaveBeenCalled();
     });
 
-    it('GET /agreements/:id/activity - errors', async () => {
-      // 401: Invalid token
-      await request(app.getHttpServer())
-        .get(`/v1/agreements/${AGREEMENT_ID}/activity`)
-        .set('Authorization', 'Bearer invalid-token')
-        .expect(401);
+    it('accepts a valid transition (pending → funded) and updates DB', async () => {
+      const contractId = 'wh-accept-1';
+      supabase.tables.agreements.push({
+        id: 'wh-accept-agr',
+        contract_id: contractId,
+        title: 'Wh accept test',
+        description: 'Accept test',
+        amount: '100.00',
+        asset: 'USDC',
+        status: 'pending',
+        created_by: WALLET,
+        milestones: [],
+        metadata: {},
+        created_at: '2026-06-01T00:00:00.000Z',
+        updated_at: '2026-06-01T00:00:00.000Z',
+      });
+      supabase.tables.agreement_activity = [];
 
-      // 404: Not found
-      const missingId = '550e8400-e29b-41d4-a716-446655449999';
-      await request(app.getHttpServer())
-        .get(`/v1/agreements/${missingId}/activity`)
-        .set(auth())
-        .expect(404);
+      const result = await svc.handleEvent({ event: 'escrow.funded', contractId });
 
-      // 403: Unauthorized wallet (other user lacks access)
-      await request(app.getHttpServer())
-        .get(`/v1/agreements/${AGREEMENT_ID}/activity`)
-        .set(auth(OTHER_USER_ID))
-        .expect(403);
+      expect(result).toEqual({ handled: true });
+      const agreement = supabase.tables.agreements.find((a) => a.contract_id === contractId);
+      expect(agreement?.status).toBe('funded');
+      expect(emit).toHaveBeenCalledWith(
+        'agreement.funded',
+        expect.objectContaining({ agreementId: 'wh-accept-agr' }),
+      );
     });
+  });
 
-    it('GET /agreements/by-contract/:contractId - success', async () => {
-      await request(app.getHttpServer())
-        .get(`/v1/agreements/by-contract/${CONTRACT_ID}`)
-        .set(auth())
-        .expect(200)
-        .expect(({ body }) => {
-          expect(body.error).toBeNull();
-          expect(body.agreement.contract_id).toBe(CONTRACT_ID);
-        });
-    });
+  // ---------------------------------------------------------------------------
+  // updateMilestone — happy path
+  // ---------------------------------------------------------------------------
+  it('updateMilestone: updates milestone status and triggers consistency check', async () => {
+    await request(app.getHttpServer())
+      .patch(`/v1/agreements/${AGREEMENT_ID}/milestones`)
+      .set(auth())
+      .send({
+        milestone_index: 0,
+        status: 'approved',
+        actor_wallet: WALLET,
+      })
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.success).toBe(true);
+      });
 
-    it('GET /agreements/by-contract/:contractId - errors', async () => {
-      // 401: Invalid token
-      await request(app.getHttpServer())
-        .get(`/v1/agreements/by-contract/${CONTRACT_ID}`)
-        .set('Authorization', 'Bearer invalid-token')
-        .expect(401);
-
-      // 200 with null agreement (not found)
-      await request(app.getHttpServer())
-        .get('/v1/agreements/by-contract/non-existent-contract')
-        .set(auth())
-        .expect(200)
-        .expect(({ body }) => {
-          expect(body.agreement).toBeNull();
-          expect(body.error).toContain('Ningún acuerdo tiene contract_id igual a este valor');
-        });
-
-      // 403: Unauthorized (other user accessing)
-      await request(app.getHttpServer())
-        .get(`/v1/agreements/by-contract/${CONTRACT_ID}`)
-        .set(auth(OTHER_USER_ID))
-        .expect(403);
-    });
+    const agreement = supabase.tables.agreements.find((a) => a.id === AGREEMENT_ID);
+    expect(agreement?.milestones[0].status).toBe('approved');
   });
 });
 

@@ -5,6 +5,7 @@ import * as crypto from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
+import { validateTransition } from '../agreements/agreement.validator';
 import type { TrustlessWorkEventDto } from './dto/trustless-work-event.dto';
 
 interface EventConfig {
@@ -128,6 +129,31 @@ export class WebhooksService {
     payload: TrustlessWorkEventDto,
     targetStatus: string,
   ): Promise<void> {
+    // fail-open: SELECT returns null for transient DB errors or missing agreement →
+    // validation is skipped, the UPDATE+neq guard below acts as the real source of truth.
+    // fail-closed: SELECT succeeds with a known status → validateTransition gates the write.
+    const { data: current, error: selectError } = await this.supabase
+      .getClient()
+      .from('agreements')
+      .select('status')
+      .eq('contract_id', payload.contractId)
+      .maybeSingle();
+    if (selectError) {
+      this.logger.warn(
+        `Validation SELECT failed for contractId="${payload.contractId}": ${selectError.message} — proceeding fail-open`,
+      );
+    }
+    if (current) {
+      const transitionValidation = validateTransition(current.status as string, targetStatus);
+      if (!transitionValidation.success) {
+        this.logger.warn(
+          `Invalid transition from TW webhook: "${current.status}" → "${targetStatus}" for ` +
+            `contractId="${payload.contractId}" — skipping. ${JSON.stringify(transitionValidation.error)}`,
+        );
+        return;
+      }
+    }
+
     const updates: Record<string, unknown> = {
       status: targetStatus,
       updated_at: new Date().toISOString(),

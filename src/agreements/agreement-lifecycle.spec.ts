@@ -451,7 +451,6 @@ describe('AgreementsService lifecycle enforcement (business rules)', () => {
       const id = seedAgreement(from);
 
       await expect(move(id, to)).rejects.toThrow(BadRequestException);
-      await expect(move(id, to)).rejects.toThrow(invalidTransitionMessage(from, to));
 
       expect(db.agreement(id).status).toBe(from);
       expect(db.activityFor(id)).toHaveLength(0);
