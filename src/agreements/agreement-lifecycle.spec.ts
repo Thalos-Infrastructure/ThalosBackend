@@ -571,6 +571,96 @@ describe('AgreementsService lifecycle enforcement (business rules)', () => {
     });
   });
 
+  describe('milestone notification events', () => {
+    it('emits EVIDENCE_SUBMITTED when evidence fields are provided', async () => {
+      const id = seedAgreement('active', {
+        milestones: [{ description: 'Design', amount: '50.00', status: 'pending' }],
+      });
+      emit.mockClear();
+
+      await service.updateMilestone(PAYEE_USER, id, {
+        milestone_index: 0,
+        status: 'pending',
+        actor_wallet: PAYEE_WALLET,
+        evidence_description: 'Deliverable uploaded',
+        evidence_urls: ['https://example.com/proof'],
+      });
+
+      expect(emit).toHaveBeenCalledWith(AGREEMENT_EVENTS.EVIDENCE_SUBMITTED, {
+        agreementId: id,
+        agreementTitle: 'Lifecycle test agreement',
+        milestoneIndex: 0,
+        milestoneDescription: 'Design',
+        milestoneAmount: '50.00',
+        asset: 'USDC',
+        submittedByWallet: PAYEE_WALLET,
+        evidenceDescription: 'Deliverable uploaded',
+        evidenceUrls: ['https://example.com/proof'],
+      });
+    });
+
+    it('emits MILESTONE_APPROVED when status transitions to approved', async () => {
+      const id = seedAgreement('active', {
+        milestones: [{ description: 'Build', amount: '100.00', status: 'pending' }],
+      });
+      emit.mockClear();
+
+      await service.updateMilestone(PAYER_USER, id, {
+        milestone_index: 0,
+        status: 'approved',
+        actor_wallet: PAYER_WALLET,
+      });
+
+      expect(emit).toHaveBeenCalledWith(AGREEMENT_EVENTS.MILESTONE_APPROVED, {
+        agreementId: id,
+        agreementTitle: 'Lifecycle test agreement',
+        milestoneIndex: 0,
+        milestoneDescription: 'Build',
+        milestoneAmount: '100.00',
+        asset: 'USDC',
+        approvedByWallet: PAYER_WALLET,
+      });
+    });
+
+    it('does not re-emit MILESTONE_APPROVED when already approved', async () => {
+      const id = seedAgreement('active', {
+        milestones: [{ description: 'Build', amount: '100.00', status: 'approved' }],
+      });
+      emit.mockClear();
+
+      await service.updateMilestone(PAYER_USER, id, {
+        milestone_index: 0,
+        status: 'approved',
+        actor_wallet: PAYER_WALLET,
+      });
+
+      expect(emit).not.toHaveBeenCalledWith(AGREEMENT_EVENTS.MILESTONE_APPROVED, expect.anything());
+    });
+
+    it('emits both evidence and approved events when both conditions hold', async () => {
+      const id = seedAgreement('active', {
+        milestones: [{ description: 'Build', amount: '100.00', status: 'pending' }],
+      });
+      emit.mockClear();
+
+      await service.updateMilestone(PAYER_USER, id, {
+        milestone_index: 0,
+        status: 'approved',
+        actor_wallet: PAYER_WALLET,
+        evidence_description: 'Final delivery',
+      });
+
+      expect(emit).toHaveBeenCalledWith(
+        AGREEMENT_EVENTS.EVIDENCE_SUBMITTED,
+        expect.objectContaining({ agreementId: id }),
+      );
+      expect(emit).toHaveBeenCalledWith(
+        AGREEMENT_EVENTS.MILESTONE_APPROVED,
+        expect.objectContaining({ agreementId: id }),
+      );
+    });
+  });
+
   describe('permission checks', () => {
     it('lets any participant (not only the creator) transition the agreement', async () => {
       const id = seedAgreement('active');
@@ -707,6 +797,12 @@ describe('Dispute flows drive the agreement lifecycle', () => {
         details: expect.objectContaining({ dispute_id: disputeId }),
       }),
     ]);
+    expect(emit).toHaveBeenCalledWith(AGREEMENT_EVENTS.DISPUTE_OPENED, {
+      disputeId,
+      agreementId: AGREEMENT_ID,
+      openedByWallet: PAYER_WALLET,
+      reason: 'Deliverable does not match scope',
+    });
   });
 
   it('outsiders cannot open disputes', async () => {
@@ -740,6 +836,14 @@ describe('Dispute flows drive the agreement lifecycle', () => {
       'dispute_resolver_assigned',
       'dispute_resolved',
     ]);
+    expect(emit).toHaveBeenCalledWith(AGREEMENT_EVENTS.DISPUTE_RESOLVED, {
+      disputeId,
+      agreementId: AGREEMENT_ID,
+      resolvedByWallet: RESOLVER_WALLET,
+      payerPercentage: 40,
+      payeePercentage: 60,
+      resolutionNotes: 'Partial delivery accepted',
+    });
 
     // The lifecycle machine agrees resolved is terminal: nothing may follow.
     await expect(
