@@ -260,7 +260,7 @@ export class AgreementsService {
     const { data: agreement, error: fetchError } = await this.supabase
       .getClient()
       .from('agreements')
-      .select('milestones')
+      .select('id, title, amount, asset, milestones')
       .eq('id', agreementId)
       .single();
 
@@ -281,6 +281,7 @@ export class AgreementsService {
     }
 
     const milestone = milestones[dto.milestone_index];
+    const previousStatus = milestone.status;
     const emitsEvidence = dto.evidence_description !== undefined || dto.evidence_urls !== undefined;
 
     milestone.status = dto.status;
@@ -308,8 +309,42 @@ export class AgreementsService {
 
     await this.logActivity(agreementId, dto.actor_wallet, `milestone_${dto.status}`, {
       milestone_index: dto.milestone_index,
-      milestone_description: milestones[dto.milestone_index].description,
+      milestone_description: milestone.description,
+      milestone_amount: milestone.amount,
+      asset: agreement.asset ?? 'USDC',
+      evidence_description: dto.evidence_description,
+      evidence_urls: dto.evidence_urls,
     });
+
+    const agreementTitle = (agreement.title as string) ?? agreementId;
+    const asset = (agreement.asset as string) ?? 'USDC';
+
+    if (emitsEvidence) {
+      this.eventEmitter.emit(AGREEMENT_EVENTS.EVIDENCE_SUBMITTED, {
+        agreementId: agreement.id as string,
+        agreementTitle,
+        milestoneIndex: dto.milestone_index,
+        milestoneDescription: milestone.description,
+        milestoneAmount: milestone.amount,
+        asset,
+        submittedByWallet: dto.actor_wallet,
+        evidenceDescription: dto.evidence_description,
+        evidenceUrls: dto.evidence_urls,
+      });
+    }
+
+    if (previousStatus !== 'approved' && dto.status === 'approved') {
+      this.eventEmitter.emit(AGREEMENT_EVENTS.MILESTONE_APPROVED, {
+        agreementId: agreement.id as string,
+        agreementTitle,
+        milestoneIndex: dto.milestone_index,
+        milestoneDescription: milestone.description,
+        milestoneAmount: milestone.amount,
+        asset,
+        approvedByWallet: dto.actor_wallet,
+      });
+    }
+
     return { success: true, error: null };
   }
 
