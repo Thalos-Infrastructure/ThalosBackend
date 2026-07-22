@@ -7,6 +7,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SupabaseService } from '../supabase/supabase.service';
 import { AgreementsService } from '../agreements/agreements.service';
+import { AgreementsBackendClient } from '../agreements/agreements-backend.client';
 import { DISPUTE_OPENED, DISPUTE_RESOLVED } from '../common/constants/notification-events';
 import {
   OpenDisputeDto,
@@ -45,6 +46,7 @@ export class DisputesService {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly agreements: AgreementsService,
+    private readonly backendClient: AgreementsBackendClient,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -70,25 +72,20 @@ export class DisputesService {
     const wallet = await this.walletForUserId(userId);
     if (!wallet) throw new ForbiddenException('No wallet on profile');
 
-    const { data: agreement, error: aErr } = await this.supabase
-      .getClient()
-      .from('agreements')
-      .select('id, created_by')
-      .eq('id', agreementId)
-      .maybeSingle();
-    if (aErr || !agreement) throw new NotFoundException('Agreement not found');
+    // Get agreement via backend client to check access
+    const result = await this.backendClient.getAgreement(agreementId, wallet);
+    if (!result.success || !result.data?.agreement) {
+      throw new NotFoundException('Agreement not found');
+    }
 
-    const createdBy = (agreement as { created_by: string }).created_by;
+    const agreement = result.data.agreement;
+    const createdBy = agreement.created_by;
     if (createdBy === wallet || createdBy === userId) return;
 
-    const { data: parts } = await this.supabase
-      .getClient()
-      .from('agreement_participants')
-      .select('wallet_address')
-      .eq('agreement_id', agreementId)
-      .eq('wallet_address', wallet)
-      .limit(1);
-    if (!parts?.length) {
+    // Check if wallet is a participant
+    const participants = result.data.participants ?? [];
+    const isParticipant = participants.some((p) => p.wallet_address === wallet);
+    if (!isParticipant) {
       throw new ForbiddenException('Not a participant of this agreement');
     }
   }
@@ -100,12 +97,15 @@ export class DisputesService {
     details: Record<string, unknown> = {},
   ) {
     try {
-      await this.supabase.getClient().from('agreement_activity').insert({
-        agreement_id: agreementId,
-        actor_wallet: actorWallet,
-        action,
-        details,
-      });
+      await this.backendClient.logActivity(
+        {
+          agreement_id: agreementId,
+          actor_wallet: actorWallet,
+          action,
+          details,
+        },
+        actorWallet,
+      );
     } catch (e) {
       console.error('logAgreementActivity', e);
     }
@@ -148,12 +148,16 @@ export class DisputesService {
       return { dispute: null, error: error.message };
     }
 
-    // Update agreement status to disputed
-    await this.supabase
-      .getClient()
-      .from('agreements')
-      .update({ status: 'disputed', updated_at: new Date().toISOString() })
-      .eq('id', dto.agreement_id);
+    // Update agreement status to disputed using backend client
+    const updateResult = await this.backendClient.updateAgreementStatus(
+      dto.agreement_id,
+      { status: 'disputed', actor_wallet: dto.opened_by },
+      dto.opened_by,
+    );
+
+    if (!updateResult.success) {
+      console.error('Failed to update agreement status to disputed:', updateResult.error);
+    }
 
     await this.logActivity(dto.agreement_id, dto.opened_by, 'dispute_opened', {
       dispute_id: dispute.id,
@@ -266,16 +270,16 @@ export class DisputesService {
       })
       .eq('id', disputeId);
 
-    // Update agreement status
-    await this.supabase
-      .getClient()
-      .from('agreements')
-      .update({
-        status: 'resolved',
-        completed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', dispute.agreement_id);
+    // Update agreement status to resolved using backend client
+    const updateResult = await this.backendClient.updateAgreementStatus(
+      dispute.agreement_id,
+      { status: 'resolved', actor_wallet: dto.resolved_by },
+      dto.resolved_by,
+    );
+
+    if (!updateResult.success) {
+      console.error('Failed to update agreement status to resolved:', updateResult.error);
+    }
 
     await this.logActivity(dispute.agreement_id, dto.resolved_by, 'dispute_resolved', {
       dispute_id: disputeId,
@@ -331,12 +335,16 @@ export class DisputesService {
       return { success: false, error: error.message };
     }
 
-    // Revert agreement status to active
-    await this.supabase
-      .getClient()
-      .from('agreements')
-      .update({ status: 'active', updated_at: new Date().toISOString() })
-      .eq('id', dispute.agreement_id);
+    // Revert agreement status to active using backend client
+    const updateResult = await this.backendClient.updateAgreementStatus(
+      dispute.agreement_id,
+      { status: 'active', actor_wallet: dto.cancelled_by },
+      dto.cancelled_by,
+    );
+
+    if (!updateResult.success) {
+      console.error('Failed to update agreement status to active:', updateResult.error);
+    }
 
     await this.logActivity(dispute.agreement_id, dto.cancelled_by, 'dispute_cancelled', {
       dispute_id: disputeId,

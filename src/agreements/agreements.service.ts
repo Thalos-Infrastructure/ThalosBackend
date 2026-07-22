@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SupabaseService } from '../supabase/supabase.service';
+import { AgreementsBackendClient } from './agreements-backend.client';
 import { CreateAgreementDto } from './dto/create-agreement.dto';
 import { LinkContractDto } from './dto/link-contract.dto';
 import { UpdateAgreementStatusDto } from './dto/update-status.dto';
@@ -21,6 +22,7 @@ import {
 export class AgreementsService {
   constructor(
     private readonly supabase: SupabaseService,
+    private readonly backendClient: AgreementsBackendClient,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -65,25 +67,20 @@ export class AgreementsService {
     const wallet = await this.walletForUserId(userId);
     if (!wallet) throw new ForbiddenException('No wallet on profile');
 
-    const { data: agreement, error: aErr } = await this.supabase
-      .getClient()
-      .from('agreements')
-      .select('id, created_by')
-      .eq('id', agreementId)
-      .maybeSingle();
-    if (aErr || !agreement) throw new NotFoundException('Agreement not found');
+    // Get agreement via backend client to check access
+    const result = await this.backendClient.getAgreement(agreementId, wallet);
+    if (!result.success || !result.data?.agreement) {
+      throw new NotFoundException('Agreement not found');
+    }
 
-    const createdBy = (agreement as { created_by: string }).created_by;
+    const agreement = result.data.agreement;
+    const createdBy = agreement.created_by;
     if (createdBy === wallet || createdBy === userId) return;
 
-    const { data: parts } = await this.supabase
-      .getClient()
-      .from('agreement_participants')
-      .select('wallet_address')
-      .eq('agreement_id', agreementId)
-      .eq('wallet_address', wallet)
-      .limit(1);
-    if (!parts?.length) {
+    // Check if wallet is a participant
+    const participants = result.data.participants ?? [];
+    const isParticipant = participants.some((p) => p.wallet_address === wallet);
+    if (!isParticipant) {
       throw new ForbiddenException('Not a participant of this agreement');
     }
   }
@@ -93,69 +90,38 @@ export class AgreementsService {
 
     const createdByProfileId = await this.profileIdByWallet(dto.created_by);
 
-    const agreementRow: Record<string, unknown> = {
+    const backendReq = {
       contract_id: dto.contract_id ?? null,
       title: dto.title,
       description: dto.description ?? null,
       amount: dto.amount,
       asset: dto.asset ?? 'USDC',
-      status: 'pending',
       agreement_type: dto.agreement_type ?? 'single',
       milestones: dto.milestones ?? [],
       metadata: dto.metadata ?? {},
       created_by: dto.created_by,
+      created_by_profile_id: createdByProfileId ?? undefined,
+      participants: dto.participants.map((p) => ({
+        wallet_address: p.wallet_address,
+        role: p.role,
+        profile_id: p.profile_id,
+      })),
     };
-    if (createdByProfileId) {
-      agreementRow.created_by_profile_id = createdByProfileId;
+
+    const result = await this.backendClient.createAgreement(dto.created_by, backendReq);
+    if (!result.success || !result.data?.agreement) {
+      return { agreement: null, error: result.error || 'Failed to create agreement' };
     }
 
-    const { data: agreement, error: agreementError } = await this.supabase
-      .getClient()
-      .from('agreements')
-      .insert(agreementRow)
-      .select()
-      .single();
-
-    if (agreementError) {
-      return { agreement: null, error: agreementError.message };
-    }
-
-    const participants = await Promise.all(
-      dto.participants.map(async (p) => {
-        const row: Record<string, unknown> = {
-          agreement_id: agreement.id,
-          wallet_address: p.wallet_address,
-          role: p.role,
-        };
-        const pid = p.profile_id ?? (await this.profileIdByWallet(p.wallet_address));
-        if (pid) row.profile_id = pid;
-        return row;
-      }),
-    );
-
-    const { error: participantsError } = await this.supabase
-      .getClient()
-      .from('agreement_participants')
-      .insert(participants);
-
-    if (participantsError) {
-      throw new BadRequestException(
-        `Failed to create agreement participants: ${participantsError.message}`,
-      );
-    }
-
-    await this.logActivity(agreement.id, dto.created_by, 'created', {
-      title: dto.title,
-      amount: dto.amount,
-    });
+    const agreement = result.data.agreement;
 
     this.eventEmitter.emit(AGREEMENT_EVENTS.CREATED, {
       agreementId: agreement.id,
-      title: dto.title,
-      description: dto.description,
-      amount: dto.amount,
-      asset: dto.asset ?? 'USDC',
-      createdByWallet: dto.created_by,
+      title: agreement.title,
+      description: agreement.description,
+      amount: agreement.amount,
+      asset: agreement.asset ?? 'USDC',
+      createdByWallet: agreement.created_by,
       participantWallets: dto.participants.map((p) => p.wallet_address),
     });
 
@@ -166,20 +132,17 @@ export class AgreementsService {
     await this.assertCanAccessAgreement(userId, agreementId);
     await this.assertActorWallet(userId, dto.actor_wallet);
 
-    const { error } = await this.supabase
-      .getClient()
-      .from('agreements')
-      .update({
-        contract_id: dto.contract_id,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', agreementId);
+    const result = await this.backendClient.linkContract(
+      agreementId,
+      dto.contract_id,
+      dto.actor_wallet,
+      dto.actor_wallet,
+    );
 
-    if (error) return { success: false, error: error.message };
+    if (!result.success) {
+      return { success: false, error: result.error || 'Failed to link contract' };
+    }
 
-    await this.logActivity(agreementId, dto.actor_wallet, 'contract_linked', {
-      contract_id: dto.contract_id,
-    });
     return { success: true, error: null };
   }
 
@@ -187,18 +150,14 @@ export class AgreementsService {
     await this.assertCanAccessAgreement(userId, agreementId);
     await this.assertActorWallet(userId, dto.actor_wallet);
 
-    const { data: current, error: fetchError } = await this.supabase
-      .getClient()
-      .from('agreements')
-      .select('status, milestones, title, amount, asset')
-      .eq('id', agreementId)
-      .single();
-
-    if (fetchError || !current) {
-      return { success: false, error: fetchError?.message || 'Agreement not found' };
+    // Get current agreement to validate transition
+    const getResult = await this.backendClient.getAgreement(agreementId, dto.actor_wallet);
+    if (!getResult.success || !getResult.data?.agreement) {
+      return { success: false, error: 'Agreement not found' };
     }
 
-    const fromStatus = current.status as string;
+    const current = getResult.data.agreement;
+    const fromStatus = current.status;
 
     if (!canTransition(fromStatus, dto.status)) {
       throw new BadRequestException(invalidTransitionMessage(fromStatus, dto.status));
@@ -210,29 +169,18 @@ export class AgreementsService {
       );
     }
 
-    const updates: Record<string, unknown> = {
-      status: dto.status,
-      updated_at: new Date().toISOString(),
-    };
-    if (dto.status === 'funded') {
-      updates.funded_at = new Date().toISOString();
-    } else if (dto.status === 'completed' || dto.status === 'resolved') {
-      updates.completed_at = new Date().toISOString();
+    const updateResult = await this.backendClient.updateAgreementStatus(
+      agreementId,
+      {
+        status: dto.status,
+        actor_wallet: dto.actor_wallet,
+      },
+      dto.actor_wallet,
+    );
+
+    if (!updateResult.success) {
+      return { success: false, error: updateResult.error || 'Failed to update status' };
     }
-
-    const { error } = await this.supabase
-      .getClient()
-      .from('agreements')
-      .update(updates)
-      .eq('id', agreementId);
-
-    if (error) return { success: false, error: error.message };
-
-    await this.logActivity(agreementId, dto.actor_wallet, `status_changed_to_${dto.status}`, {
-      status: dto.status,
-      from: fromStatus,
-      to: dto.status,
-    });
 
     if (dto.status === 'funded') {
       this.eventEmitter.emit(AGREEMENT_EVENTS.FUNDED, {
@@ -259,177 +207,91 @@ export class AgreementsService {
     await this.assertCanAccessAgreement(userId, agreementId);
     await this.assertActorWallet(userId, dto.actor_wallet);
 
-    const { data: agreement, error: fetchError } = await this.supabase
-      .getClient()
-      .from('agreements')
-      .select('milestones')
-      .eq('id', agreementId)
-      .single();
+    const result = await this.backendClient.updateMilestone(
+      agreementId,
+      {
+        milestone_index: dto.milestone_index,
+        status: dto.status,
+        actor_wallet: dto.actor_wallet,
+        evidence_description: dto.evidence_description,
+        evidence_urls: dto.evidence_urls,
+      },
+      dto.actor_wallet,
+    );
 
-    if (fetchError || !agreement) {
-      return { success: false, error: fetchError?.message || 'Not found' };
+    if (!result.success) {
+      return { success: false, error: result.error || 'Failed to update milestone' };
     }
 
-    const milestones = agreement.milestones as Array<{
-      description: string;
-      amount: string;
-      status: string;
-      evidence_description?: string;
-      evidence_urls?: string[];
-      evidence_submitted_at?: string;
-    }>;
-    if (dto.milestone_index < 0 || dto.milestone_index >= milestones.length) {
-      return { success: false, error: 'Invalid milestone index' };
-    }
-
-    const milestone = milestones[dto.milestone_index];
-    const emitsEvidence = dto.evidence_description !== undefined || dto.evidence_urls !== undefined;
-
-    milestone.status = dto.status;
-
-    if (dto.evidence_description !== undefined) {
-      milestone.evidence_description = dto.evidence_description;
-    }
-    if (dto.evidence_urls !== undefined) {
-      milestone.evidence_urls = dto.evidence_urls;
-    }
-    if (emitsEvidence) {
-      milestone.evidence_submitted_at = new Date().toISOString();
-    }
-
-    const { error: updateError } = await this.supabase
-      .getClient()
-      .from('agreements')
-      .update({
-        milestones,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', agreementId);
-
-    if (updateError) return { success: false, error: updateError.message };
-
-    await this.logActivity(agreementId, dto.actor_wallet, `milestone_${dto.status}`, {
-      milestone_index: dto.milestone_index,
-      milestone_description: milestones[dto.milestone_index].description,
-    });
     return { success: true, error: null };
   }
 
   async listByWallet(userId: string, wallet: string) {
     await this.assertActorWallet(userId, wallet);
 
-    const { data: participations, error: partError } = await this.supabase
-      .getClient()
-      .from('agreement_participants')
-      .select('agreement_id')
-      .eq('wallet_address', wallet);
-
-    if (partError) {
-      return { agreements: [], error: partError.message };
+    const result = await this.backendClient.listAgreementsByWallet(wallet, wallet);
+    if (!result.success) {
+      return { agreements: [], error: result.error || 'Failed to list agreements' };
     }
 
-    const { data: createdRows, error: createdError } = await this.supabase
-      .getClient()
-      .from('agreements')
-      .select('id')
-      .eq('created_by', wallet);
-
-    if (createdError) {
-      return { agreements: [], error: createdError.message };
-    }
-
-    const idSet = new Set<string>();
-    participations?.forEach((p) => {
-      if (p.agreement_id) idSet.add(p.agreement_id as string);
-    });
-    createdRows?.forEach((r) => {
-      if (r.id) idSet.add(r.id as string);
-    });
-
-    if (idSet.size === 0) {
-      return { agreements: [], error: null };
-    }
-
-    const ids = [...idSet];
-    const { data: agreements, error: agError } = await this.supabase
-      .getClient()
-      .from('agreements')
-      .select('*')
-      .in('id', ids)
-      .order('created_at', { ascending: false });
-
-    if (agError) return { agreements: [], error: agError.message };
-    return { agreements: agreements ?? [], error: null };
+    return { agreements: result.data?.agreements ?? [], error: null };
   }
 
   async getById(userId: string, agreementId: string) {
     await this.assertCanAccessAgreement(userId, agreementId);
 
-    const { data: agreement, error: agError } = await this.supabase
-      .getClient()
-      .from('agreements')
-      .select('*')
-      .eq('id', agreementId)
-      .single();
-
-    if (agError) {
-      return { agreement: null, participants: [], error: agError.message };
+    const wallet = await this.walletForUserId(userId);
+    if (!wallet) {
+      return { agreement: null, participants: [], error: 'No wallet found' };
     }
 
-    const { data: participants, error: partError } = await this.supabase
-      .getClient()
-      .from('agreement_participants')
-      .select('*')
-      .eq('agreement_id', agreementId);
-
-    if (partError) {
-      return { agreement, participants: [], error: partError.message };
+    const result = await this.backendClient.getAgreement(agreementId, wallet);
+    if (!result.success) {
+      return { agreement: null, participants: [], error: result.error || 'Agreement not found' };
     }
-    return { agreement, participants: participants ?? [], error: null };
+
+    return {
+      agreement: result.data?.agreement ?? null,
+      participants: result.data?.participants ?? [],
+      error: null,
+    };
   }
 
   async getByContractId(userId: string, contractId: string) {
-    const { data, error } = await this.supabase
-      .getClient()
-      .from('agreements')
-      .select('*')
-      .eq('contract_id', contractId)
-      .maybeSingle();
-
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return {
-          agreement: null,
-          error:
-            'Ningún acuerdo tiene contract_id igual a este valor (revisá Supabase o hacé PATCH link-contract antes).',
-        };
-      }
-      return { agreement: null, error: error.message };
+    const wallet = await this.walletForUserId(userId);
+    if (!wallet) {
+      return { agreement: null, error: 'No wallet found' };
     }
-    if (!data) {
+
+    const result = await this.backendClient.getAgreementByContractId(contractId, wallet);
+    if (!result.success || !result.data?.agreement) {
       return {
         agreement: null,
         error:
+          result.error ||
           'Ningún acuerdo tiene contract_id igual a este valor (copiá el texto exacto de la columna contract_id).',
       };
     }
 
-    await this.assertCanAccessAgreement(userId, data.id);
-    return { agreement: data, error: null };
+    const agreement = result.data.agreement;
+    await this.assertCanAccessAgreement(userId, agreement.id);
+    return { agreement, error: null };
   }
 
   async getActivity(userId: string, agreementId: string) {
     await this.assertCanAccessAgreement(userId, agreementId);
 
-    const { data, error } = await this.supabase
-      .getClient()
-      .from('agreement_activity')
-      .select('*')
-      .eq('agreement_id', agreementId)
-      .order('created_at', { ascending: false });
+    const wallet = await this.walletForUserId(userId);
+    if (!wallet) {
+      return { activities: [], error: 'No wallet found' };
+    }
 
-    if (error) return { activities: [], error: error.message };
-    return { activities: data ?? [], error: null };
+    const result = await this.backendClient.getAgreementActivity(agreementId, wallet);
+    if (!result.success) {
+      return { activities: [], error: result.error || 'Failed to get activity' };
+    }
+
+    return { activities: result.data?.activities ?? [], error: null };
   }
 
   private async logActivity(
@@ -439,12 +301,15 @@ export class AgreementsService {
     details: Record<string, unknown> = {},
   ) {
     try {
-      await this.supabase.getClient().from('agreement_activity').insert({
-        agreement_id: agreementId,
-        actor_wallet: actorWallet,
-        action,
-        details,
-      });
+      await this.backendClient.logActivity(
+        {
+          agreement_id: agreementId,
+          actor_wallet: actorWallet,
+          action,
+          details,
+        },
+        actorWallet,
+      );
     } catch (e) {
       console.error('logAgreementActivity', e);
     }
