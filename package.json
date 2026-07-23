@@ -15,7 +15,7 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "test": "jest",
-    "test:integration": "jest integration/migrated-flows.integration.spec.ts --runInBand",
+    "test:integration": "jest integration/migrated-flows.integration.spec.ts integration/retry-queue.integration.spec.ts --runInBand",
     "test:cov": "jest --coverage"
   },
   "dependencies": {
@@ -52,6 +52,7 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.6",
     "jest": "^30.4.2",
+    "jest-environment-node": "^30.4.1",
     "jsonwebtoken": "^9.0.2",
     "prettier": "^3.8.4",
     "supertest": "^7.2.2",

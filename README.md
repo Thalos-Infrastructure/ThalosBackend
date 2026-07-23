@@ -32,6 +32,12 @@ Copy [`.env.example`](.env.example) to `.env.local` and fill in real values. `.e
 | `TRUSTLESSWORK_API_URL` | For escrow ops | Base URL of the Trustless Work API. |
 | `TRUSTLESSWORK_API_KEY` | For escrow ops | Trustless Work API key, injected server-side by the relay. **Never expose to the browser.** |
 | `TRUSTLESS_WORK_WEBHOOK_SECRET` | For TW webhooks | HMAC secret to verify incoming Trustless Work webhook calls (`x-trustless-signature`). If unset, all webhook requests are rejected with 401. |
+| `RETRY_QUEUE_MAX_ATTEMPTS` | No | Max attempts per retry-queue job before it's marked `failed`. Defaults to 5. |
+| `RETRY_QUEUE_BASE_DELAY_MS` | No | Base delay (ms) for the retry queue's exponential backoff. Defaults to 1000. |
+| `RETRY_QUEUE_MAX_DELAY_MS` | No | Cap (ms) on the retry queue's backoff delay. Defaults to 60000. |
+| `RETRY_QUEUE_POLL_INTERVAL_MS` | No | How often (ms) the retry queue polls for due jobs. Defaults to 5000. |
+| `RETRY_QUEUE_CONCURRENCY` | No | Max due jobs processed per retry-queue poll cycle. Defaults to 3. |
+| `RETRY_QUEUE_STALE_PROCESSING_MS` | No | How long (ms) a job can sit in `processing` before being reclaimed as orphaned by a crash. Defaults to 60000. |
 | `STELLAR_NETWORK` | No | Stellar network: `testnet` (default) or `mainnet`. |
 | `PLATFORM_ADDRESS` | No | Platform address used when creating escrows. Has a testnet default. |
 | `DISPUTE_RESOLVER` | No | Dispute resolver address used when creating escrows. Has a testnet default. |
@@ -103,6 +109,7 @@ Next.js  ──/api/* (server)──►  NestJS (v1/*)  ──►  Supabase (Pos
 | `wallets` | Wallet linking |
 | `notifications` | Resend-based email notifications + HTML templates |
 | `internal-trustless` | Relay to Trustless Work + typed escrow read endpoints |
+| `retry-queue` | Persistent retry/recovery queue for Trustless Work operations — the single retry primitive shared by every module (`@Global()`, admin-only manual-retry endpoint) |
 
 ## Authentication & security
 
@@ -129,6 +136,9 @@ The browser must call the Next.js frontend (`/api/...`), which forwards to this 
 | `GET /v1/users/search` | Bearer JWT | Profile search |
 | `GET\|POST\|DELETE /v1/contacts` | Bearer JWT | Contacts |
 | `POST /v1/internal/notifications/*` | Internal secret | Trigger transactional emails |
+| `GET /v1/retry-queue` | Bearer JWT (admin) | List retry-queue jobs, optionally filtered by `status` |
+| `GET /v1/retry-queue/:id` | Bearer JWT (admin) | Get one retry-queue job |
+| `POST /v1/retry-queue/:id/retry` | Bearer JWT (admin) | Manually re-run a job, bypassing its scheduled backoff |
 
 The Trustless Work relay only allows paths under `deployer/`, `escrow/`, and `helper/`.
 
@@ -148,6 +158,24 @@ Transactional email notifications are wired through in-process **EventEmitter2**
 Event name constants live in `src/common/constants/notification-events.ts` (single source of truth, no string literals).
 
 If `RESEND_API_KEY` is not set, emails are skipped with a warning log — the originating action is never blocked.
+
+## Retry queue (Trustless Work operations)
+
+`src/retry-queue` is the **single** retry/recovery primitive for Trustless Work operations
+(agreement creation, milestone updates, status sync, contract retrieval, payment execution).
+Jobs are persisted in the `retry_jobs` table so a crashed/restarted process resumes where it
+left off, instead of losing in-flight work.
+
+- **Enqueue** from any module: `retryQueueService.enqueue(jobType, payload, idempotencyKey)`.
+  A duplicate `idempotencyKey` is a no-op — it returns the existing job instead of creating a
+  second one.
+- **Register a handler** per `RetryJobType` (typically in a consumer module's `onModuleInit`)
+  via `retryQueueService.registerHandler(jobType, async (payload, attempt) => { ... })`. Throw
+  to signal failure; the queue retries with exponential backoff (`RETRY_QUEUE_BASE_DELAY_MS` /
+  `RETRY_QUEUE_MAX_DELAY_MS`) up to `RETRY_QUEUE_MAX_ATTEMPTS`, then marks the job `failed`.
+  An admin can force one more attempt via `POST /v1/retry-queue/:id/retry`.
+- Other Trustless Work features (sync, webhooks, milestones, lifecycle) must call into this
+  queue rather than implementing their own retry loop.
 
 ## Docs
 

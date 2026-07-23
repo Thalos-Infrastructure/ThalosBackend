@@ -102,6 +102,9 @@ importers:
       jest:
         specifier: ^30.4.2
         version: 30.4.2(@types/node@22.20.1)
+      jest-environment-node:
+        specifier: ^30.4.1
+        version: 30.4.1
       jsonwebtoken:
         specifier: ^9.0.2
         version: 9.0.3
@@ -5702,7 +5705,7 @@ snapshots:
       chalk: 4.1.2
       graceful-fs: 4.2.11
       jest-util: 30.4.1
-      picomatch: 4.0.4
+      picomatch: 4.0.5
       pretty-format: 30.4.1
       slash: 3.0.0
       stack-utils: 2.0.6
@@ -5824,7 +5827,7 @@ snapshots:
       chalk: 4.1.2
       ci-info: 4.4.0
       graceful-fs: 4.2.11
-      picomatch: 4.0.4
+      picomatch: 4.0.5
 
   jest-validate@30.4.1:
     dependencies:
