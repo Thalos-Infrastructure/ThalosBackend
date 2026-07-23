@@ -147,6 +147,24 @@ export class AgreementsService {
       amount: dto.amount,
     });
 
+    const createdMilestones = (agreement.milestones ?? []) as Array<{
+      description?: string;
+      status?: string;
+    }>;
+    for (let index = 0; index < createdMilestones.length; index++) {
+      const milestone = createdMilestones[index];
+      await this.logActivity(
+        agreement.id,
+        dto.created_by,
+        'milestone_created',
+        {
+          milestone_index: index,
+          milestone_description: milestone.description,
+        },
+        { previousState: null, newState: milestone.status ?? 'pending' },
+      );
+    }
+
     this.eventEmitter.emit(AGREEMENT_EVENTS.CREATED, {
       agreementId: agreement.id,
       title: dto.title,
@@ -226,11 +244,17 @@ export class AgreementsService {
 
     if (error) return { success: false, error: error.message };
 
-    await this.logActivity(agreementId, dto.actor_wallet, `status_changed_to_${dto.status}`, {
-      status: dto.status,
-      from: fromStatus,
-      to: dto.status,
-    });
+    await this.logActivity(
+      agreementId,
+      dto.actor_wallet,
+      `status_changed_to_${dto.status}`,
+      {
+        status: dto.status,
+        from: fromStatus,
+        to: dto.status,
+      },
+      { previousState: fromStatus, newState: dto.status },
+    );
 
     if (dto.status === 'funded') {
       this.eventEmitter.emit(AGREEMENT_EVENTS.FUNDED, {
@@ -282,6 +306,7 @@ export class AgreementsService {
 
     const milestone = milestones[dto.milestone_index];
     const emitsEvidence = dto.evidence_description !== undefined || dto.evidence_urls !== undefined;
+    const previousMilestoneStatus = milestone.status;
 
     milestone.status = dto.status;
 
@@ -306,10 +331,18 @@ export class AgreementsService {
 
     if (updateError) return { success: false, error: updateError.message };
 
-    await this.logActivity(agreementId, dto.actor_wallet, `milestone_${dto.status}`, {
-      milestone_index: dto.milestone_index,
-      milestone_description: milestones[dto.milestone_index].description,
-    });
+    await this.logActivity(
+      agreementId,
+      dto.actor_wallet,
+      `milestone_${dto.status}`,
+      {
+        milestone_index: dto.milestone_index,
+        milestone_description: milestones[dto.milestone_index].description,
+        from: previousMilestoneStatus,
+        to: dto.status,
+      },
+      { previousState: previousMilestoneStatus, newState: dto.status },
+    );
     return { success: true, error: null };
   }
 
@@ -430,21 +463,44 @@ export class AgreementsService {
     return { activities: data ?? [], error: null };
   }
 
+  /** Optional state-transition metadata for an activity entry. */
   private async logActivity(
     agreementId: string,
     actorWallet: string,
     action: string,
     details: Record<string, unknown> = {},
+    states: { previousState?: string | null; newState?: string | null } = {},
   ) {
     try {
-      await this.supabase.getClient().from('agreement_activity').insert({
-        agreement_id: agreementId,
-        actor_wallet: actorWallet,
-        action,
-        details,
-      });
+      await this.supabase
+        .getClient()
+        .from('agreement_activity')
+        .insert({
+          agreement_id: agreementId,
+          actor_wallet: actorWallet,
+          action,
+          details,
+          previous_state: states.previousState ?? null,
+          new_state: states.newState ?? null,
+        });
     } catch (e) {
       console.error('logAgreementActivity', e);
     }
+  }
+
+  /**
+   * Public, backward-compatible alias for {@link logActivity}. Kept for external
+   * callers that expect this name and used by other modules (e.g. DisputesService)
+   * so dispute lifecycle events land in the same agreement timeline without
+   * duplicating the logger.
+   */
+  async logAgreementActivity(
+    agreementId: string,
+    actorWallet: string,
+    action: string,
+    details: Record<string, unknown> = {},
+    states: { previousState?: string | null; newState?: string | null } = {},
+  ) {
+    return this.logActivity(agreementId, actorWallet, action, details, states);
   }
 }

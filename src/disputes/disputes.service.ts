@@ -93,24 +93,6 @@ export class DisputesService {
     }
   }
 
-  private async logActivity(
-    agreementId: string,
-    actorWallet: string,
-    action: string,
-    details: Record<string, unknown> = {},
-  ) {
-    try {
-      await this.supabase.getClient().from('agreement_activity').insert({
-        agreement_id: agreementId,
-        actor_wallet: actorWallet,
-        action,
-        details,
-      });
-    } catch (e) {
-      console.error('logAgreementActivity', e);
-    }
-  }
-
   async openDispute(userId: string, dto: OpenDisputeDto) {
     await this.assertCanAccessAgreement(userId, dto.agreement_id);
     await this.assertActorWallet(userId, dto.opened_by);
@@ -148,6 +130,16 @@ export class DisputesService {
       return { dispute: null, error: error.message };
     }
 
+    // Capture the agreement's status before moving it to `disputed`, so the
+    // activity entry records the previous/new state of the transition.
+    const { data: agreementRow } = await this.supabase
+      .getClient()
+      .from('agreements')
+      .select('status')
+      .eq('id', dto.agreement_id)
+      .maybeSingle();
+    const previousStatus = (agreementRow?.status as string | undefined) ?? null;
+
     // Update agreement status to disputed
     await this.supabase
       .getClient()
@@ -155,10 +147,13 @@ export class DisputesService {
       .update({ status: 'disputed', updated_at: new Date().toISOString() })
       .eq('id', dto.agreement_id);
 
-    await this.logActivity(dto.agreement_id, dto.opened_by, 'dispute_opened', {
-      dispute_id: dispute.id,
-      reason: dto.reason,
-    });
+    await this.agreements.logAgreementActivity(
+      dto.agreement_id,
+      dto.opened_by,
+      'dispute_opened',
+      { dispute_id: dispute.id, reason: dto.reason },
+      { previousState: previousStatus, newState: 'disputed' },
+    );
 
     this.eventEmitter.emit(DISPUTE_OPENED, {
       disputeId: dispute.id,
@@ -202,10 +197,12 @@ export class DisputesService {
       return { success: false, error: error.message };
     }
 
-    await this.logActivity(dispute.agreement_id, dto.resolver_wallet, 'dispute_resolver_assigned', {
-      dispute_id: disputeId,
-      resolver_wallet: dto.resolver_wallet,
-    });
+    await this.agreements.logAgreementActivity(
+      dispute.agreement_id,
+      dto.resolver_wallet,
+      'dispute_resolver_assigned',
+      { dispute_id: disputeId, resolver_wallet: dto.resolver_wallet },
+    );
 
     return { success: true, error: null };
   }
@@ -266,6 +263,15 @@ export class DisputesService {
       })
       .eq('id', disputeId);
 
+    // Capture the agreement's status before moving it to `resolved`.
+    const { data: agreementRow } = await this.supabase
+      .getClient()
+      .from('agreements')
+      .select('status')
+      .eq('id', dispute.agreement_id)
+      .maybeSingle();
+    const previousStatus = (agreementRow?.status as string | undefined) ?? 'disputed';
+
     // Update agreement status
     await this.supabase
       .getClient()
@@ -277,12 +283,18 @@ export class DisputesService {
       })
       .eq('id', dispute.agreement_id);
 
-    await this.logActivity(dispute.agreement_id, dto.resolved_by, 'dispute_resolved', {
-      dispute_id: disputeId,
-      payer_percentage: dto.payer_percentage,
-      payee_percentage: dto.payee_percentage,
-      resolution_notes: dto.resolution_notes,
-    });
+    await this.agreements.logAgreementActivity(
+      dispute.agreement_id,
+      dto.resolved_by,
+      'dispute_resolved',
+      {
+        dispute_id: disputeId,
+        payer_percentage: dto.payer_percentage,
+        payee_percentage: dto.payee_percentage,
+        resolution_notes: dto.resolution_notes,
+      },
+      { previousState: previousStatus, newState: 'resolved' },
+    );
 
     this.eventEmitter.emit(DISPUTE_RESOLVED, {
       disputeId,
@@ -338,9 +350,13 @@ export class DisputesService {
       .update({ status: 'active', updated_at: new Date().toISOString() })
       .eq('id', dispute.agreement_id);
 
-    await this.logActivity(dispute.agreement_id, dto.cancelled_by, 'dispute_cancelled', {
-      dispute_id: disputeId,
-    });
+    await this.agreements.logAgreementActivity(
+      dispute.agreement_id,
+      dto.cancelled_by,
+      'dispute_cancelled',
+      { dispute_id: disputeId },
+      { previousState: 'disputed', newState: 'active' },
+    );
 
     return { success: true, error: null };
   }

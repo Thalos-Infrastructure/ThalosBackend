@@ -647,6 +647,114 @@ describe('AgreementsService lifecycle enforcement (business rules)', () => {
       ]);
     });
   });
+
+  describe('extended activity logging: previous/new state + milestone actions (issue #61)', () => {
+    it('records previous_state and new_state on a status transition', async () => {
+      const id = seedAgreement('pending');
+      await move(id, 'funded');
+
+      expect(db.activityFor(id)).toEqual([
+        expect.objectContaining({
+          action: 'status_changed_to_funded',
+          actor_wallet: PAYER_WALLET,
+          previous_state: 'pending',
+          new_state: 'funded',
+          details: expect.objectContaining({ from: 'pending', to: 'funded' }),
+        }),
+      ]);
+    });
+
+    it('records previous_state and new_state on a milestone transition', async () => {
+      const id = seedAgreement('active', {
+        milestones: [{ description: 'Build', amount: '100.00', status: 'pending' }],
+      });
+
+      const result = await service.updateMilestone(PAYER_USER, id, {
+        milestone_index: 0,
+        status: 'approved',
+        actor_wallet: PAYER_WALLET,
+      });
+
+      expect(result).toEqual({ success: true, error: null });
+      expect(db.activityFor(id)).toEqual([
+        expect.objectContaining({
+          action: 'milestone_approved',
+          previous_state: 'pending',
+          new_state: 'approved',
+        }),
+      ]);
+    });
+
+    it('logs the discrete milestone_rejected action with its state transition', async () => {
+      const id = seedAgreement('active', {
+        milestones: [{ description: 'Build', amount: '100.00', status: 'approved' }],
+      });
+
+      await service.updateMilestone(PAYER_USER, id, {
+        milestone_index: 0,
+        status: 'rejected',
+        actor_wallet: PAYER_WALLET,
+      });
+
+      expect(db.activityFor(id)).toEqual([
+        expect.objectContaining({
+          action: 'milestone_rejected',
+          previous_state: 'approved',
+          new_state: 'rejected',
+        }),
+      ]);
+    });
+
+    it('logs milestone_created per milestone at creation; non-transition entries keep null state', async () => {
+      const { agreement, error } = await service.create(PAYER_USER, {
+        created_by: PAYER_WALLET,
+        title: 'Agreement with milestones',
+        amount: '100.00',
+        participants: [
+          { wallet_address: PAYER_WALLET, role: 'payer' },
+          { wallet_address: PAYEE_WALLET, role: 'payee' },
+        ],
+        milestones: [
+          { description: 'Design', amount: '50.00', status: 'pending' },
+          { description: 'Build', amount: '50.00', status: 'pending' },
+        ],
+      });
+
+      expect(error).toBeNull();
+      const acts = db.activityFor(agreement!.id);
+      expect(acts.map((a: Row) => a.action)).toEqual([
+        'created',
+        'milestone_created',
+        'milestone_created',
+      ]);
+      // The generic 'created' entry is not a state transition.
+      expect(acts[0]).toEqual(
+        expect.objectContaining({ action: 'created', previous_state: null, new_state: null }),
+      );
+      expect(acts[1]).toEqual(
+        expect.objectContaining({
+          action: 'milestone_created',
+          new_state: 'pending',
+          details: expect.objectContaining({ milestone_index: 0 }),
+        }),
+      );
+    });
+
+    it('preserves the existing details payload (from/to) on transitions for backward compatibility', async () => {
+      const id = seedAgreement('pending');
+      await move(id, 'funded');
+
+      const entry = db.activityFor(id)[0];
+      // Existing consumers that read details.from / details.to keep working, and
+      // the new columns are additive.
+      expect(entry.details).toEqual(
+        expect.objectContaining({ status: 'funded', from: 'pending', to: 'funded' }),
+      );
+      expect(entry).toEqual(
+        expect.objectContaining({ previous_state: 'pending', new_state: 'funded' }),
+      );
+    });
+  });
 });
 
 describe('Dispute flows drive the agreement lifecycle', () => {
@@ -707,6 +815,39 @@ describe('Dispute flows drive the agreement lifecycle', () => {
         details: expect.objectContaining({ dispute_id: disputeId }),
       }),
     ]);
+  });
+
+  it('records dispute open/resolve in the agreement timeline with previous/new state (issue #61)', async () => {
+    const disputeId = await openDispute();
+    await disputes.assignResolver(PAYER_USER, disputeId, { resolver_wallet: RESOLVER_WALLET });
+    await disputes.resolveDispute(RESOLVER_USER, disputeId, {
+      resolved_by: RESOLVER_WALLET,
+      payer_percentage: 50,
+      payee_percentage: 50,
+      resolution_notes: 'Split evenly',
+    });
+
+    const timeline = db.activityFor(AGREEMENT_ID);
+    // Dispute lifecycle events live in the SAME agreement timeline (deduped logger).
+    expect(timeline.map((a: Row) => a.action)).toEqual([
+      'dispute_opened',
+      'dispute_resolver_assigned',
+      'dispute_resolved',
+    ]);
+    expect(timeline[0]).toEqual(
+      expect.objectContaining({
+        action: 'dispute_opened',
+        previous_state: 'active',
+        new_state: 'disputed',
+      }),
+    );
+    expect(timeline[2]).toEqual(
+      expect.objectContaining({
+        action: 'dispute_resolved',
+        previous_state: 'disputed',
+        new_state: 'resolved',
+      }),
+    );
   });
 
   it('outsiders cannot open disputes', async () => {
