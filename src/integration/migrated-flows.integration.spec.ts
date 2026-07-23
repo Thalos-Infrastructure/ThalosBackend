@@ -705,9 +705,6 @@ describe('migrated backend flows (integration)', () => {
     return disputeId;
   }
 
-  // ---------------------------------------------------------------------------
-  // Standardized error contract — invalid create rejected server-side
-  // ---------------------------------------------------------------------------
   describe('standardized error contract on invalid agreement creation', () => {
     it('rejects a payload with invalid amount and returns { success: false, error: { code, details } }', async () => {
       await request(app.getHttpServer())

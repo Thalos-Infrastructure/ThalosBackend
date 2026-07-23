@@ -713,6 +713,7 @@ describe('AgreementsService lifecycle enforcement (business rules)', () => {
           { wallet_address: PAYER_WALLET, role: 'payer' },
           { wallet_address: PAYEE_WALLET, role: 'payee' },
         ],
+        agreement_type: 'multi',
         milestones: [
           { description: 'Design', amount: '50.00', status: 'pending' },
           { description: 'Build', amount: '50.00', status: 'pending' },
