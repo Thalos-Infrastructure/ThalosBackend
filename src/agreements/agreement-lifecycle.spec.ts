@@ -842,20 +842,22 @@ describe('Dispute flows drive the agreement lifecycle', () => {
     });
 
     const timeline = db.activityFor(AGREEMENT_ID);
-    // Dispute lifecycle events live in the SAME agreement timeline (deduped logger).
+    // Shared side-effect path also writes status_changed_to_* around dispute actions.
     expect(timeline.map((a: Row) => a.action)).toEqual([
+      'status_changed_to_disputed',
       'dispute_opened',
       'dispute_resolver_assigned',
+      'status_changed_to_resolved',
       'dispute_resolved',
     ]);
-    expect(timeline[0]).toEqual(
+    expect(timeline.find((a: Row) => a.action === 'dispute_opened')).toEqual(
       expect.objectContaining({
         action: 'dispute_opened',
         previous_state: 'active',
         new_state: 'disputed',
       }),
     );
-    expect(timeline[2]).toEqual(
+    expect(timeline.find((a: Row) => a.action === 'dispute_resolved')).toEqual(
       expect.objectContaining({
         action: 'dispute_resolved',
         previous_state: 'disputed',

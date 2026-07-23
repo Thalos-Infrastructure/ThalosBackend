@@ -549,4 +549,3 @@ export class AgreementsService {
     return { activities: data ?? [], error: null };
   }
 }
-

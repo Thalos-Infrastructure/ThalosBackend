@@ -363,7 +363,7 @@ export class DisputesService {
       'dispute_cancelled',
       { dispute_id: disputeId },
       { previousState: statusResult.fromStatus ?? 'disputed', newState: 'active' },
-    )
+    );
 
     return { success: true, error: null };
   }

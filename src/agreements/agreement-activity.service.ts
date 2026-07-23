@@ -27,14 +27,17 @@ export class AgreementActivityService {
     states: ActivityStates = {},
   ): Promise<void> {
     try {
-      const { error } = await this.supabase.getClient().from('agreement_activity').insert({
-        agreement_id: agreementId,
-        actor_wallet: actorWallet,
-        action,
-        details,
-        previous_state: states.previousState ?? null,
-        new_state: states.newState ?? null,
-      });
+      const { error } = await this.supabase
+        .getClient()
+        .from('agreement_activity')
+        .insert({
+          agreement_id: agreementId,
+          actor_wallet: actorWallet,
+          action,
+          details,
+          previous_state: states.previousState ?? null,
+          new_state: states.newState ?? null,
+        });
       if (error) {
         this.logger.error(`logActivity insert failed: ${error.message}`);
       }
