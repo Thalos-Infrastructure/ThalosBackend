@@ -139,6 +139,7 @@ export class AgreementsService {
       .insert(participants);
 
     if (participantsError) {
+      await this.supabase.getClient().from('agreements').delete().eq('id', agreement.id);
       throw new BadRequestException(
         `Failed to create agreement participants: ${participantsError.message}`,
       );

@@ -688,6 +688,32 @@ describe('migrated backend flows (integration)', () => {
     expect(participants).toHaveLength(2);
   });
 
+  it('rolls back agreement creation when participant insert fails', async () => {
+    const initialAgreementCount = supabase.tables.agreements.length;
+
+    // Force participant insert to fail
+    supabase.failOnce('agreement_participants', 'insert', 'participant constraint violation');
+
+    await request(app.getHttpServer())
+      .post('/v1/agreements')
+      .set(auth())
+      .send({
+        title: 'Failed participant agreement',
+        amount: '100.00',
+        created_by: WALLET,
+        participants: [
+          { wallet_address: WALLET, role: 'payer' },
+          { wallet_address: OTHER_WALLET, role: 'payee' },
+        ],
+      })
+      .expect(400)
+      .expect(({ body }) => {
+        expect(body.message || body.error).toContain('Failed to create agreement participants');
+      });
+
+    expect(supabase.tables.agreements).toHaveLength(initialAgreementCount);
+  });
+
   it('allows agreement creator and participants to list messages', async () => {
     await request(app.getHttpServer())
       .get(`/v1/agreements/${AGREEMENT_ID}/messages`)
