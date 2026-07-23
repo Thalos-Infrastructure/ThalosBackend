@@ -692,6 +692,367 @@ describe('migrated backend flows (integration)', () => {
 
     return disputeId;
   }
+
+  describe('Agreements Module Integration Suite', () => {
+    it('POST /agreements - success', async () => {
+      await request(app.getHttpServer())
+        .post('/v1/agreements')
+        .set(auth())
+        .send({
+          title: 'Test POST agreements',
+          amount: '500.00',
+          asset: 'USDC',
+          created_by: WALLET,
+          participants: [
+            { wallet_address: WALLET, role: 'payer' },
+            { wallet_address: SECOND_WALLET, role: 'payee' },
+          ],
+        })
+        .expect(201)
+        .expect(({ body }) => {
+          expect(body.error).toBeNull();
+          expect(body.agreement).toBeDefined();
+        });
+    });
+
+    it('POST /agreements - errors (invalid token, mismatched creator)', async () => {
+      // 401: Invalid token
+      await request(app.getHttpServer())
+        .post('/v1/agreements')
+        .set('Authorization', 'Bearer invalid-token')
+        .send({
+          title: 'Test POST agreements',
+          amount: '500.00',
+          created_by: WALLET,
+          participants: [{ wallet_address: WALLET, role: 'payer' }],
+        })
+        .expect(401);
+
+      // 403: Mismatched creator wallet (other wallet is owned by other user)
+      await request(app.getHttpServer())
+        .post('/v1/agreements')
+        .set(auth())
+        .send({
+          title: 'Test POST agreements',
+          amount: '500.00',
+          created_by: OTHER_WALLET,
+          participants: [{ wallet_address: OTHER_WALLET, role: 'payer' }],
+        })
+        .expect(403);
+    });
+
+    it('GET /agreements/by-wallet - success', async () => {
+      await request(app.getHttpServer())
+        .get(`/v1/agreements/by-wallet?wallet=${WALLET}`)
+        .set(auth())
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.error).toBeNull();
+          expect(body.agreements).toBeDefined();
+        });
+    });
+
+    it('GET /agreements/by-wallet - errors (invalid token, forbidden wallet)', async () => {
+      // 401: Invalid token
+      await request(app.getHttpServer())
+        .get(`/v1/agreements/by-wallet?wallet=${WALLET}`)
+        .set('Authorization', 'Bearer invalid-token')
+        .expect(401);
+
+      // 403: Forbidden wallet
+      await request(app.getHttpServer())
+        .get(`/v1/agreements/by-wallet?wallet=${OTHER_WALLET}`)
+        .set(auth())
+        .expect(403);
+    });
+
+    it('GET /agreements/:id - success', async () => {
+      await request(app.getHttpServer())
+        .get(`/v1/agreements/${AGREEMENT_ID}`)
+        .set(auth())
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.error).toBeNull();
+          expect(body.agreement.id).toBe(AGREEMENT_ID);
+        });
+    });
+
+    it('GET /agreements/:id - errors (invalid token, not found, unauthorized)', async () => {
+      // 401: Invalid token
+      await request(app.getHttpServer())
+        .get(`/v1/agreements/${AGREEMENT_ID}`)
+        .set('Authorization', 'Bearer invalid-token')
+        .expect(401);
+
+      // 404: Not found
+      const missingId = '550e8400-e29b-41d4-a716-446655449999';
+      await request(app.getHttpServer()).get(`/v1/agreements/${missingId}`).set(auth()).expect(404);
+
+      // 403: Mismatched / unauthorized wallet (other user accessing USER_ID's agreement)
+      await request(app.getHttpServer())
+        .get(`/v1/agreements/${AGREEMENT_ID}`)
+        .set(auth(OTHER_USER_ID))
+        .expect(403);
+    });
+
+    it('PATCH /agreements/:id/link-contract - success and activity log', async () => {
+      const contractId = 'new-contract-link-123';
+      await request(app.getHttpServer())
+        .patch(`/v1/agreements/${AGREEMENT_ID}/link-contract`)
+        .set(auth())
+        .send({
+          contract_id: contractId,
+          actor_wallet: WALLET,
+        })
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.success).toBe(true);
+        });
+
+      // Verify contract updated in db
+      const agreement = supabase.tables.agreements.find((a) => a.id === AGREEMENT_ID);
+      expect(agreement?.contract_id).toBe(contractId);
+
+      // Assert activity log entry is created
+      const activities = supabase.tables.agreement_activity.filter(
+        (act) => act.agreement_id === AGREEMENT_ID && act.action === 'contract_linked',
+      );
+      expect(activities.length).toBeGreaterThan(0);
+      expect(activities[0].details).toMatchObject({ contract_id: contractId });
+    });
+
+    it('PATCH /agreements/:id/link-contract - errors', async () => {
+      // 401: Invalid token
+      await request(app.getHttpServer())
+        .patch(`/v1/agreements/${AGREEMENT_ID}/link-contract`)
+        .set('Authorization', 'Bearer invalid-token')
+        .send({ contract_id: 'c-1', actor_wallet: WALLET })
+        .expect(401);
+
+      // 404: Not found
+      const missingId = '550e8400-e29b-41d4-a716-446655449999';
+      await request(app.getHttpServer())
+        .patch(`/v1/agreements/${missingId}/link-contract`)
+        .set(auth())
+        .send({ contract_id: 'c-1', actor_wallet: WALLET })
+        .expect(404);
+
+      // 403: Unauthorized user (OTHER_USER_ID lacks access)
+      await request(app.getHttpServer())
+        .patch(`/v1/agreements/${AGREEMENT_ID}/link-contract`)
+        .set(auth(OTHER_USER_ID))
+        .send({ contract_id: 'c-1', actor_wallet: OTHER_WALLET })
+        .expect(403);
+
+      // 403: Mismatched actor wallet for USER_ID (actor_wallet is OTHER_WALLET, but token is USER_ID)
+      await request(app.getHttpServer())
+        .patch(`/v1/agreements/${AGREEMENT_ID}/link-contract`)
+        .set(auth())
+        .send({ contract_id: 'c-1', actor_wallet: OTHER_WALLET })
+        .expect(403);
+    });
+
+    it('PATCH /agreements/:id/status - success and activity log', async () => {
+      // Transition from active to in_review
+      await request(app.getHttpServer())
+        .patch(`/v1/agreements/${AGREEMENT_ID}/status`)
+        .set(auth())
+        .send({
+          status: 'in_review',
+          actor_wallet: WALLET,
+        })
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.success).toBe(true);
+        });
+
+      // Verify status updated in db
+      const agreement = supabase.tables.agreements.find((a) => a.id === AGREEMENT_ID);
+      expect(agreement?.status).toBe('in_review');
+
+      // Assert activity log entry is created
+      const activities = supabase.tables.agreement_activity.filter(
+        (act) => act.agreement_id === AGREEMENT_ID && act.action === 'status_changed_to_in_review',
+      );
+      expect(activities.length).toBeGreaterThan(0);
+      expect(activities[0].details).toMatchObject({ from: 'active', to: 'in_review' });
+    });
+
+    it('PATCH /agreements/:id/status - errors', async () => {
+      // 401: Invalid token
+      await request(app.getHttpServer())
+        .patch(`/v1/agreements/${AGREEMENT_ID}/status`)
+        .set('Authorization', 'Bearer invalid-token')
+        .send({ status: 'completed', actor_wallet: WALLET })
+        .expect(401);
+
+      // 404: Not found
+      const missingId = '550e8400-e29b-41d4-a716-446655449999';
+      await request(app.getHttpServer())
+        .patch(`/v1/agreements/${missingId}/status`)
+        .set(auth())
+        .send({ status: 'completed', actor_wallet: WALLET })
+        .expect(404);
+
+      // 403: Unauthorized (OTHER_USER_ID lacks access)
+      await request(app.getHttpServer())
+        .patch(`/v1/agreements/${AGREEMENT_ID}/status`)
+        .set(auth(OTHER_USER_ID))
+        .send({ status: 'completed', actor_wallet: OTHER_WALLET })
+        .expect(403);
+
+      // 400: Invalid transition (completed status when milestones are not approved)
+      // Note: At this point status is 'in_review', but milestone is 'pending'.
+      // Trying to transition to completed should fail because milestonesSatisfyCompletion returns false.
+      await request(app.getHttpServer())
+        .patch(`/v1/agreements/${AGREEMENT_ID}/status`)
+        .set(auth())
+        .send({ status: 'completed', actor_wallet: WALLET })
+        .expect(400);
+    });
+
+    it('PATCH /agreements/:id/milestones - success and activity log', async () => {
+      // Update milestone 0 status to approved
+      await request(app.getHttpServer())
+        .patch(`/v1/agreements/${AGREEMENT_ID}/milestones`)
+        .set(auth())
+        .send({
+          milestone_index: 0,
+          status: 'approved',
+          actor_wallet: WALLET,
+          evidence_description: 'Deliverable complete',
+        })
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.success).toBe(true);
+        });
+
+      // Verify milestone updated in db
+      const agreement = supabase.tables.agreements.find((a) => a.id === AGREEMENT_ID);
+      expect(agreement?.milestones[0].status).toBe('approved');
+      expect(agreement?.milestones[0].evidence_description).toBe('Deliverable complete');
+
+      // Assert activity log entry is created
+      const activities = supabase.tables.agreement_activity.filter(
+        (act) => act.agreement_id === AGREEMENT_ID && act.action === 'milestone_approved',
+      );
+      expect(activities.length).toBeGreaterThan(0);
+      expect(activities[0].details).toMatchObject({ milestone_index: 0 });
+    });
+
+    it('PATCH /agreements/:id/milestones - errors', async () => {
+      // 401: Invalid token
+      await request(app.getHttpServer())
+        .patch(`/v1/agreements/${AGREEMENT_ID}/milestones`)
+        .set('Authorization', 'Bearer invalid-token')
+        .send({ milestone_index: 0, status: 'approved', actor_wallet: WALLET })
+        .expect(401);
+
+      // 404: Not found
+      const missingId = '550e8400-e29b-41d4-a716-446655449999';
+      await request(app.getHttpServer())
+        .patch(`/v1/agreements/${missingId}/milestones`)
+        .set(auth())
+        .send({ milestone_index: 0, status: 'approved', actor_wallet: WALLET })
+        .expect(404);
+
+      // 403: Mismatched / unauthorized wallet (other user accessing)
+      await request(app.getHttpServer())
+        .patch(`/v1/agreements/${AGREEMENT_ID}/milestones`)
+        .set(auth(OTHER_USER_ID))
+        .send({ milestone_index: 0, status: 'approved', actor_wallet: OTHER_WALLET })
+        .expect(403);
+
+      // 200 with success: false (invalid milestone index)
+      await request(app.getHttpServer())
+        .patch(`/v1/agreements/${AGREEMENT_ID}/milestones`)
+        .set(auth())
+        .send({ milestone_index: 99, status: 'approved', actor_wallet: WALLET })
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.success).toBe(false);
+          expect(body.error).toBe('Invalid milestone index');
+        });
+    });
+
+    it('GET /agreements/:id/activity - success', async () => {
+      // Seed some activity
+      supabase.tables.agreement_activity.push({
+        id: 'act-test-1',
+        agreement_id: AGREEMENT_ID,
+        actor_wallet: WALLET,
+        action: 'status_changed_to_active',
+        details: {},
+        created_at: '2026-07-21T00:00:00.000Z',
+      });
+
+      await request(app.getHttpServer())
+        .get(`/v1/agreements/${AGREEMENT_ID}/activity`)
+        .set(auth())
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.error).toBeNull();
+          expect(body.activities).toBeDefined();
+          expect(body.activities.length).toBeGreaterThan(0);
+        });
+    });
+
+    it('GET /agreements/:id/activity - errors', async () => {
+      // 401: Invalid token
+      await request(app.getHttpServer())
+        .get(`/v1/agreements/${AGREEMENT_ID}/activity`)
+        .set('Authorization', 'Bearer invalid-token')
+        .expect(401);
+
+      // 404: Not found
+      const missingId = '550e8400-e29b-41d4-a716-446655449999';
+      await request(app.getHttpServer())
+        .get(`/v1/agreements/${missingId}/activity`)
+        .set(auth())
+        .expect(404);
+
+      // 403: Unauthorized wallet (other user lacks access)
+      await request(app.getHttpServer())
+        .get(`/v1/agreements/${AGREEMENT_ID}/activity`)
+        .set(auth(OTHER_USER_ID))
+        .expect(403);
+    });
+
+    it('GET /agreements/by-contract/:contractId - success', async () => {
+      await request(app.getHttpServer())
+        .get(`/v1/agreements/by-contract/${CONTRACT_ID}`)
+        .set(auth())
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.error).toBeNull();
+          expect(body.agreement.contract_id).toBe(CONTRACT_ID);
+        });
+    });
+
+    it('GET /agreements/by-contract/:contractId - errors', async () => {
+      // 401: Invalid token
+      await request(app.getHttpServer())
+        .get(`/v1/agreements/by-contract/${CONTRACT_ID}`)
+        .set('Authorization', 'Bearer invalid-token')
+        .expect(401);
+
+      // 200 with null agreement (not found)
+      await request(app.getHttpServer())
+        .get('/v1/agreements/by-contract/non-existent-contract')
+        .set(auth())
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.agreement).toBeNull();
+          expect(body.error).toContain('Ningún acuerdo tiene contract_id igual a este valor');
+        });
+
+      // 403: Unauthorized (other user accessing)
+      await request(app.getHttpServer())
+        .get(`/v1/agreements/by-contract/${CONTRACT_ID}`)
+        .set(auth(OTHER_USER_ID))
+        .expect(403);
+    });
+  });
 });
 
 function collectFiles(directory: string): string[] {
