@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import {
+  VerificationAccessContext,
   VerificationLevel,
   VerificationRecord,
   VerificationStatus,
@@ -22,14 +23,67 @@ export class VerificationService {
 
   constructor(private readonly supabase: SupabaseService) {}
 
-  /** KYC status for an individual user. */
-  getUserVerification(userId: string): Promise<VerificationStatusResponse> {
+  /** KYC status for an individual user. Caller must be the user, an admin, or an internal service. */
+  async getUserVerification(
+    userId: string,
+    ctx: VerificationAccessContext,
+  ): Promise<VerificationStatusResponse> {
+    await this.assertCanRead('user', userId, ctx);
     return this.getStatus('user', userId);
   }
 
-  /** KYB status for an organization / business. */
-  getBusinessVerification(businessId: string): Promise<VerificationStatusResponse> {
+  /** KYB status for an organization / business. Caller must be an admin or an internal service. */
+  async getBusinessVerification(
+    businessId: string,
+    ctx: VerificationAccessContext,
+  ): Promise<VerificationStatusResponse> {
+    await this.assertCanRead('business', businessId, ctx);
     return this.getStatus('business', businessId);
+  }
+
+  /**
+   * Guards a read against IDOR on compliance data. Access is granted when the
+   * caller is a trusted internal service, is the subject itself (users only),
+   * or is an admin. Everyone else gets a 403 — a valid JWT alone is not enough.
+   *
+   * A `business` subject has no "self" caller until org membership exists, so it
+   * is intentionally limited to internal services and admins (mirrors the RLS in
+   * `scripts/004_create_verifications.sql`).
+   */
+  private async assertCanRead(
+    subjectType: VerificationSubjectType,
+    subjectId: string,
+    ctx: VerificationAccessContext,
+  ): Promise<void> {
+    if (ctx.isInternalService) return;
+    if (subjectType === 'user' && ctx.callerUserId && ctx.callerUserId === subjectId) return;
+    if (ctx.callerUserId && (await this.isAdmin(ctx.callerUserId))) return;
+    throw new ForbiddenException('Not authorized to view this verification status');
+  }
+
+  /**
+   * Resolves whether a JWT `sub` belongs to an admin. Mirrors `KybService.isAdmin`:
+   * JWT user → `auth_users.wallet_public_key` → `profiles.role`.
+   */
+  private async isAdmin(userId: string): Promise<boolean> {
+    const { data: authUser } = await this.supabase
+      .getClient()
+      .from('auth_users')
+      .select('wallet_public_key')
+      .eq('id', userId)
+      .maybeSingle();
+
+    const wallet = (authUser as { wallet_public_key?: string } | null)?.wallet_public_key;
+    if (!wallet) return false;
+
+    const { data: profile } = await this.supabase
+      .getClient()
+      .from('profiles')
+      .select('role')
+      .eq('wallet_address', wallet)
+      .maybeSingle();
+
+    return (profile as { role?: string } | null)?.role === 'admin';
   }
 
   /**

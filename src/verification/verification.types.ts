@@ -8,6 +8,23 @@
 
 export type VerificationSubjectType = 'user' | 'business';
 
+/**
+ * Who is asking for a compliance status, resolved by the controller's guard.
+ *
+ * Compliance data is sensitive, so a valid JWT alone is not enough — a caller
+ * may only read a subject they are entitled to. Access is granted when any of:
+ *  - `isInternalService` — a trusted server-to-server consumer (Agreements,
+ *    Reputation, ...) authenticated with the internal secret;
+ *  - the caller is the subject itself (`callerUserId === subjectId`, users only);
+ *  - the caller is an admin.
+ */
+export interface VerificationAccessContext {
+  /** JWT `sub` of the caller, when the request came with an app JWT. */
+  callerUserId?: string;
+  /** True when the request authenticated with the internal service secret. */
+  isInternalService?: boolean;
+}
+
 /** Depth of the completed verification. `none` means nothing verified yet. */
 export type VerificationLevel = 'none' | 'basic' | 'standard' | 'advanced';
 
