@@ -15,7 +15,7 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "test": "jest",
-    "test:integration": "jest integration/migrated-flows.integration.spec.ts --runInBand",
+    "test:integration": "jest integration --runInBand",
     "test:cov": "jest --coverage"
   },
   "dependencies": {
