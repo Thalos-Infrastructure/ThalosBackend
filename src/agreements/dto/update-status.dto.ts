@@ -1,8 +1,9 @@
 import { IsIn, IsString } from 'class-validator';
+import { AGREEMENT_STATUSES } from '../agreement-lifecycle';
 
 export class UpdateAgreementStatusDto {
   @IsString()
-  @IsIn(['pending', 'funded', 'active', 'completed', 'disputed', 'resolved', 'cancelled'])
+  @IsIn([...AGREEMENT_STATUSES])
   status: string;
 
   @IsString()

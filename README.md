@@ -31,12 +31,15 @@ Copy [`.env.example`](.env.example) to `.env.local` and fill in real values. `.e
 | `THALOS_INTERNAL_SECRET` | Yes | Shared secret for the internal Next.js → Nest relay (`x-thalos-internal-secret`). Must match the frontend's value. |
 | `TRUSTLESSWORK_API_URL` | For escrow ops | Base URL of the Trustless Work API. |
 | `TRUSTLESSWORK_API_KEY` | For escrow ops | Trustless Work API key, injected server-side by the relay. **Never expose to the browser.** |
+| `TRUSTLESS_WORK_WEBHOOK_SECRET` | For TW webhooks | HMAC secret to verify incoming Trustless Work webhook calls (`x-trustless-signature`). If unset, all webhook requests are rejected with 401. |
+| `STELLAR_NETWORK` | No | Stellar network: `testnet` (default) or `mainnet`. |
 | `PLATFORM_ADDRESS` | No | Platform address used when creating escrows. Has a testnet default. |
 | `DISPUTE_RESOLVER` | No | Dispute resolver address used when creating escrows. Has a testnet default. |
 | `TRUSTLINE_USDC_ADDRESS` | No | USDC trustline address used when creating escrows. Has a testnet default. |
 | `RESEND_API_KEY` | For emails | Resend API key. If unset, email notifications are disabled (logged, non-fatal). |
 | `PORT` | No | HTTP port. Defaults to **3001**. |
-| `THALOS_CORS_ORIGIN` | No | Comma-separated list of allowed CORS origins. Defaults to allowing all. |
+| `THALOS_CORS_ORIGIN` | No | Comma-separated list of allowed CORS origins. Defaults to allowing all. In production include the frontend origin (e.g. `https://www.thalosplatform.xyz`). |
+| `THALOS_APP_PUBLIC_URL` | No | Public frontend URL used to build links in outgoing emails. Falls back to the first `THALOS_CORS_ORIGIN`, then `http://localhost:3000`. |
 
 ## Getting started
 

@@ -1,5 +1,13 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsIn, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  ValidateIf,
+  ValidateNested,
+} from 'class-validator';
 
 export type ServiceType = 'single-release' | 'multi-release';
 
@@ -143,8 +151,13 @@ export class DisputeMilestoneDto {
   @IsString()
   contractId: string;
 
+  @IsIn(SERVICE_TYPES)
+  type: ServiceType;
+
+  /** Required for multi-release (identifies the milestone); ignored for single-release. */
+  @ValidateIf((o: DisputeMilestoneDto) => o.type === 'multi-release')
   @IsString()
-  milestoneIndex: string;
+  milestoneIndex?: string;
 
   /** Approver o service provider; debe coincidir con la wallet del JWT. */
   @IsString()
