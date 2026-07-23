@@ -16,7 +16,10 @@
     "format:check": "prettier --check \"src/**/*.ts\"",
     "test": "jest",
     "test:integration": "jest integration/migrated-flows.integration.spec.ts --runInBand",
-    "test:cov": "jest --coverage"
+    "test:cov": "jest --coverage",
+    "test:load": "node test/load/run-all.js",
+    "test:load:mock": "node test/load/mock/server.js",
+    "test:load:seed": "node test/load/seed.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
@@ -48,6 +51,7 @@
     "@types/node": "^22.10.0",
     "@types/passport-jwt": "^4.0.1",
     "@types/supertest": "^7.2.1",
+    "autocannon": "^8.0.0",
     "eslint": "^10.5.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.6",
