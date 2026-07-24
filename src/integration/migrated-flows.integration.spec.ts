@@ -14,8 +14,6 @@ import { ApiClient } from '../common/api/api-client';
 import { AgreementsController } from '../agreements/agreements.controller';
 import { AgreementActivityService } from '../agreements/agreement-activity.service';
 import { AgreementsService } from '../agreements/agreements.service';
-import { AgreementChatController } from '../agreement-chat/agreement-chat.controller';
-import { AgreementChatService } from '../agreement-chat/agreement-chat.service';
 import { DisputesController } from '../disputes/disputes.controller';
 import { DisputesService } from '../disputes/disputes.service';
 import { EscrowsController } from '../internal-trustless/escrows.controller';
@@ -341,13 +339,7 @@ describe('migrated backend flows (integration)', () => {
     supabase = new InMemorySupabase();
     const moduleRef = await Test.createTestingModule({
       imports: [AuthModule],
-      controllers: [
-        AgreementsController,
-        AgreementChatController,
-        DisputesController,
-        EscrowsController,
-        WalletsController,
-      ],
+      controllers: [AgreementsController, DisputesController, EscrowsController, WalletsController],
       providers: [
         AgreementsService,
         AgreementActivityService,
