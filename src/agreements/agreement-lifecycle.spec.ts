@@ -390,15 +390,78 @@ describe('AgreementsService lifecycle enforcement (business rules)', () => {
     { description: 'Build', amount: '50.00', status: 'released' },
   ];
 
+  const backendClient = {
+    getAgreement: jest.fn(),
+    createAgreement: jest.fn(),
+    linkContract: jest.fn(),
+    updateAgreementStatus: jest.fn(),
+    updateMilestone: jest.fn(),
+    listAgreementsByWallet: jest.fn(),
+    getAgreementByContractId: jest.fn(),
+    getAgreementActivity: jest.fn(),
+    logActivity: jest.fn(),
+  };
+
   beforeEach(() => {
     db = new InMemoryDb();
     emit = jest.fn();
     const activity = new AgreementActivityService(db as unknown as SupabaseService);
     service = new AgreementsService(
       db as unknown as SupabaseService,
+      backendClient as unknown as AgreementsBackendClient,
       { emit } as unknown as EventEmitter2,
       activity,
     );
+
+    // Reset and setup backend client mocks
+    backendClient.getAgreement.mockReset();
+    backendClient.updateAgreementStatus.mockReset();
+    backendClient.logActivity.mockReset();
+
+    // Make getAgreement return the agreement from the in-memory DB
+    backendClient.getAgreement.mockImplementation((agreementId) => {
+      try {
+        const agreement = db.agreement(agreementId);
+        const participants = db.tables.agreement_participants.filter(
+          (p) => p.agreement_id === agreementId,
+        );
+        return Promise.resolve({
+          success: true,
+          data: { agreement, participants },
+        });
+      } catch {
+        return Promise.resolve({
+          success: false,
+          error: 'Agreement not found',
+        });
+      }
+    });
+
+    // Make updateAgreementStatus actually update the DB
+    backendClient.updateAgreementStatus.mockImplementation((agreementId, req) => {
+      const updates: Record<string, unknown> = {
+        status: req.status,
+        updated_at: new Date().toISOString(),
+      };
+      if (req.status === 'funded') {
+        updates.funded_at = new Date().toISOString();
+      } else if (req.status === 'completed' || req.status === 'resolved') {
+        updates.completed_at = new Date().toISOString();
+      }
+      db.update('agreements', [{ key: 'id', op: 'eq', value: agreementId }], updates);
+      return Promise.resolve({ success: true });
+    });
+
+    // Make logActivity actually insert into the activity table
+    backendClient.logActivity.mockImplementation((req) => {
+      db.insert('agreement_activity', {
+        agreement_id: req.agreement_id,
+        actor_wallet: req.actor_wallet,
+        action: req.action,
+        details: req.details || {},
+      });
+      return Promise.resolve({ success: true });
+    });
   });
 
   function seedAgreement(status: AgreementStatus, overrides: Row = {}): string {
@@ -766,6 +829,18 @@ describe('Dispute flows drive the agreement lifecycle', () => {
   let agreements: AgreementsService;
   let disputes: DisputesService;
   const AGREEMENT_ID = 'agr-dispute-1';
+
+  const backendClient = {
+    getAgreement: jest.fn(),
+    createAgreement: jest.fn(),
+    linkContract: jest.fn(),
+    updateAgreementStatus: jest.fn(),
+    updateMilestone: jest.fn(),
+    listAgreementsByWallet: jest.fn(),
+    getAgreementByContractId: jest.fn(),
+    getAgreementActivity: jest.fn(),
+    logActivity: jest.fn(),
+  };
 
   beforeEach(() => {
     db = new InMemoryDb();

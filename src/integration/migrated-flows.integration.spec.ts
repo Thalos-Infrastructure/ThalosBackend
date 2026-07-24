@@ -11,6 +11,7 @@ import { join } from 'path';
 import { AuthModule } from '../auth/auth.module';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ApiClient } from '../common/api/api-client';
+import { AgreementsBackendClient } from '../agreements/agreements-backend.client';
 import { AgreementsController } from '../agreements/agreements.controller';
 import { AgreementActivityService } from '../agreements/agreement-activity.service';
 import { AgreementsService } from '../agreements/agreements.service';
@@ -330,6 +331,17 @@ describe('migrated backend flows (integration)', () => {
   const apiClient = {
     get: jest.fn(),
   };
+  const backendClient = {
+    getAgreement: jest.fn(),
+    createAgreement: jest.fn(),
+    linkContract: jest.fn(),
+    updateAgreementStatus: jest.fn(),
+    updateMilestone: jest.fn(),
+    listAgreementsByWallet: jest.fn(),
+    getAgreementByContractId: jest.fn(),
+    getAgreementActivity: jest.fn(),
+    logActivity: jest.fn(),
+  };
 
   beforeAll(async () => {
     process.env.JWT_SECRET = JWT_SECRET;
@@ -349,6 +361,7 @@ describe('migrated backend flows (integration)', () => {
         { provide: ApiClient, useValue: apiClient },
         { provide: ConfigService, useValue: { get: jest.fn(() => JWT_SECRET) } },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: AgreementsBackendClient, useValue: backendClient },
       ],
     }).compile();
 
@@ -382,6 +395,41 @@ describe('migrated backend flows (integration)', () => {
         ],
       },
     });
+
+    // Reset backend client mocks
+    backendClient.getAgreement.mockReset();
+    backendClient.createAgreement.mockReset();
+    backendClient.linkContract.mockReset();
+    backendClient.updateAgreementStatus.mockReset();
+    backendClient.updateMilestone.mockReset();
+    backendClient.listAgreementsByWallet.mockReset();
+    backendClient.getAgreementByContractId.mockReset();
+    backendClient.getAgreementActivity.mockReset();
+    backendClient.logActivity.mockReset();
+
+    // Set default return values - all methods should pass through
+    backendClient.getAgreement.mockResolvedValue({
+      success: true,
+      data: { agreement: null, participants: [] },
+    });
+    backendClient.createAgreement.mockResolvedValue({ success: true, data: { agreement: {} } });
+    backendClient.linkContract.mockResolvedValue({ success: true });
+    backendClient.updateAgreementStatus.mockResolvedValue({ success: true });
+    backendClient.updateMilestone.mockResolvedValue({ success: true });
+    backendClient.listAgreementsByWallet.mockResolvedValue({
+      success: true,
+      data: { agreements: [] },
+    });
+    backendClient.getAgreementByContractId.mockResolvedValue({
+      success: true,
+      data: { agreement: null },
+    });
+    backendClient.getAgreementActivity.mockResolvedValue({
+      success: true,
+      data: { activities: [] },
+    });
+    backendClient.logActivity.mockResolvedValue({ success: true });
+
     jest.spyOn(global, 'fetch').mockResolvedValue(
       new Response(JSON.stringify([{ contractId: CONTRACT_ID, status: 'active' }]), {
         status: 200,
@@ -395,7 +443,9 @@ describe('migrated backend flows (integration)', () => {
   });
 
   afterAll(async () => {
-    await app.close();
+    if (app) {
+      await app.close();
+    }
   });
 
   // Sign HS256 tokens exactly as the frontend does; AuthModule only verifies them.

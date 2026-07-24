@@ -46,6 +46,7 @@ export class DisputesService {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly agreements: AgreementsService,
+    private readonly backendClient: AgreementsBackendClient,
     private readonly eventEmitter: EventEmitter2,
     private readonly activity: AgreementActivityService,
   ) {}
@@ -72,25 +73,20 @@ export class DisputesService {
     const wallet = await this.walletForUserId(userId);
     if (!wallet) throw new ForbiddenException('No wallet on profile');
 
-    const { data: agreement, error: aErr } = await this.supabase
-      .getClient()
-      .from('agreements')
-      .select('id, created_by')
-      .eq('id', agreementId)
-      .maybeSingle();
-    if (aErr || !agreement) throw new NotFoundException('Agreement not found');
+    // Get agreement via backend client to check access
+    const result = await this.backendClient.getAgreement(agreementId, wallet);
+    if (!result.success || !result.data?.agreement) {
+      throw new NotFoundException('Agreement not found');
+    }
 
-    const createdBy = (agreement as { created_by: string }).created_by;
+    const agreement = result.data.agreement;
+    const createdBy = agreement.created_by;
     if (createdBy === wallet || createdBy === userId) return;
 
-    const { data: parts } = await this.supabase
-      .getClient()
-      .from('agreement_participants')
-      .select('wallet_address')
-      .eq('agreement_id', agreementId)
-      .eq('wallet_address', wallet)
-      .limit(1);
-    if (!parts?.length) {
+    // Check if wallet is a participant
+    const participants = result.data.participants ?? [];
+    const isParticipant = participants.some((p) => p.wallet_address === wallet);
+    if (!isParticipant) {
       throw new ForbiddenException('Not a participant of this agreement');
     }
   }
