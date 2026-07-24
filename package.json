@@ -34,12 +34,12 @@
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "reflect-metadata": "^0.2.2",
-    "resend": "^6.12.0",
+    "resend": "^6.17.2",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@nestjs/cli": "^11.0.0",
+    "@nestjs/cli": "^11.0.24",
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.1.27",
     "@types/express": "^5.0.0",
@@ -47,7 +47,7 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.10.0",
     "@types/passport-jwt": "^4.0.1",
-    "@types/supertest": "^6.0.3",
+    "@types/supertest": "^7.2.1",
     "eslint": "^10.5.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.6",
