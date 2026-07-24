@@ -7,6 +7,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SupabaseService } from '../supabase/supabase.service';
 import { AgreementsService } from '../agreements/agreements.service';
+import { validateTransition } from '../agreements/agreement.validator';
 import { DISPUTE_OPENED, DISPUTE_RESOLVED } from '../common/constants/notification-events';
 import {
   OpenDisputeDto,
@@ -140,6 +141,11 @@ export class DisputesService {
       .maybeSingle();
     const previousStatus = (agreementRow?.status as string | undefined) ?? null;
 
+    const transitionValidation = validateTransition(agreementRow?.status as string, 'disputed');
+    if (!transitionValidation.success) {
+      throw new BadRequestException({ success: false, error: transitionValidation.error });
+    }
+
     // Update agreement status to disputed
     await this.supabase
       .getClient()
@@ -272,6 +278,11 @@ export class DisputesService {
       .maybeSingle();
     const previousStatus = (agreementRow?.status as string | undefined) ?? 'disputed';
 
+    const transitionValidation = validateTransition(agreementRow?.status as string, 'resolved');
+    if (!transitionValidation.success) {
+      throw new BadRequestException({ success: false, error: transitionValidation.error });
+    }
+
     // Update agreement status
     await this.supabase
       .getClient()
@@ -343,7 +354,18 @@ export class DisputesService {
       return { success: false, error: error.message };
     }
 
-    // Revert agreement status to active
+    // Validate and revert agreement status to active
+    const { data: agreement } = await this.supabase
+      .getClient()
+      .from('agreements')
+      .select('status')
+      .eq('id', dispute.agreement_id)
+      .single();
+    const transitionValidation = validateTransition(agreement?.status as string, 'active');
+    if (!transitionValidation.success) {
+      throw new BadRequestException({ success: false, error: transitionValidation.error });
+    }
+
     await this.supabase
       .getClient()
       .from('agreements')

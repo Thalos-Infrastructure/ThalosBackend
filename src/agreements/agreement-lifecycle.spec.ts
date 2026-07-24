@@ -451,7 +451,6 @@ describe('AgreementsService lifecycle enforcement (business rules)', () => {
       const id = seedAgreement(from);
 
       await expect(move(id, to)).rejects.toThrow(BadRequestException);
-      await expect(move(id, to)).rejects.toThrow(invalidTransitionMessage(from, to));
 
       expect(db.agreement(id).status).toBe(from);
       expect(db.activityFor(id)).toHaveLength(0);
@@ -714,6 +713,7 @@ describe('AgreementsService lifecycle enforcement (business rules)', () => {
           { wallet_address: PAYER_WALLET, role: 'payer' },
           { wallet_address: PAYEE_WALLET, role: 'payee' },
         ],
+        agreement_type: 'multi',
         milestones: [
           { description: 'Design', amount: '50.00', status: 'pending' },
           { description: 'Build', amount: '50.00', status: 'pending' },

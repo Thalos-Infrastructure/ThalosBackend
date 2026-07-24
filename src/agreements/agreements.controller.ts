@@ -31,6 +31,9 @@ export class AgreementsController {
   async create(@CurrentUser() user: AuthUserCtx, @Body() dto: CreateAgreementDto) {
     const result = await this.agreements.create(user.userId, dto);
     if (result.error) {
+      if (typeof result.error === 'object' && 'code' in result.error) {
+        return { success: false, error: result.error };
+      }
       throw new BadRequestException(result.error);
     }
     return result;
