@@ -236,6 +236,7 @@ class InMemorySupabase {
       },
     ];
     this.tables.agreement_activity = [];
+    this.tables.agreement_messages = [];
     this.tables.disputes = [];
     this.tables.dispute_resolutions = [];
   }
@@ -649,6 +650,232 @@ describe('migrated backend flows (integration)', () => {
     const files = collectFiles(libApiPath).filter((file) => /\.(ts|tsx|js|jsx)$/.test(file));
     const offenders = files.filter((file) => readFileSync(file, 'utf8').includes('supabase.from('));
     expect(offenders).toEqual([]);
+  });
+
+  it('enforces participant creation on agreement create and rejects if it fails', async () => {
+    let createdAgreementId: string;
+
+    await request(app.getHttpServer())
+      .post('/v1/agreements')
+      .set(auth())
+      .send({
+        title: 'Chat test agreement',
+        amount: '100.00',
+        created_by: WALLET,
+        participants: [
+          { wallet_address: WALLET, role: 'payer' },
+          { wallet_address: OTHER_WALLET, role: 'payee' },
+        ],
+      })
+      .expect(201)
+      .expect(({ body }) => {
+        expect(body.error).toBeNull();
+        expect(body.agreement).toBeDefined();
+        createdAgreementId = body.agreement.id;
+      });
+
+    // Verify participants were created
+    const participants = supabase.tables.agreement_participants.filter(
+      (p) => p.agreement_id === createdAgreementId,
+    );
+    expect(participants).toHaveLength(2);
+  });
+
+  it('rolls back agreement creation when participant insert fails', async () => {
+    const initialAgreementCount = supabase.tables.agreements.length;
+
+    // Force participant insert to fail
+    supabase.failOnce('agreement_participants', 'insert', 'participant constraint violation');
+
+    await request(app.getHttpServer())
+      .post('/v1/agreements')
+      .set(auth())
+      .send({
+        title: 'Failed participant agreement',
+        amount: '100.00',
+        created_by: WALLET,
+        participants: [
+          { wallet_address: WALLET, role: 'payer' },
+          { wallet_address: OTHER_WALLET, role: 'payee' },
+        ],
+      })
+      .expect(400)
+      .expect(({ body }) => {
+        expect(body.message || body.error).toContain('Failed to create agreement participants');
+      });
+
+    expect(supabase.tables.agreements).toHaveLength(initialAgreementCount);
+  });
+
+  it('allows agreement creator and participants to list messages', async () => {
+    // Creator (USER_ID with WALLET) can list messages
+    await request(app.getHttpServer())
+      .get(`/v1/agreements/${AGREEMENT_ID}/messages`)
+      .set(auth())
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.messages).toEqual([]);
+        expect(body.error).toBeNull();
+      });
+
+    // Add a participant owned by OTHER_USER_ID to verify role-based access
+    supabase.tables.agreement_participants.push({
+      id: 'participant-test-other-user',
+      agreement_id: AGREEMENT_ID,
+      wallet_address: OTHER_WALLET,
+      role: 'payee',
+    });
+
+    // Participant (OTHER_USER_ID with OTHER_WALLET) can also list messages
+    await request(app.getHttpServer())
+      .get(`/v1/agreements/${AGREEMENT_ID}/messages`)
+      .set(auth(OTHER_USER_ID))
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.messages).toEqual([]);
+        expect(body.error).toBeNull();
+      });
+  });
+
+  it('rejects non-participants from listing messages', async () => {
+    await request(app.getHttpServer())
+      .get(`/v1/agreements/${AGREEMENT_ID}/messages`)
+      .set(auth(RESOLVER_USER_ID))
+      .expect(403);
+  });
+
+  it('creator can send a message with sender_id and participants receive it', async () => {
+    // Create a new agreement for this test with proper participants
+    const createRes = await request(app.getHttpServer())
+      .post('/v1/agreements')
+      .set(auth())
+      .send({
+        title: 'Chat test - creator sends',
+        amount: '100.00',
+        created_by: WALLET,
+        participants: [
+          { wallet_address: WALLET, role: 'payer' },
+          { wallet_address: OTHER_WALLET, role: 'payee' },
+        ],
+      });
+    expect(createRes.status).toBe(201);
+    const testAgreementId = createRes.body.agreement.id;
+
+    const messageText = `Test message from creator at ${Date.now()}`;
+    let messageId: string;
+
+    // Creator sends message
+    await request(app.getHttpServer())
+      .post(`/v1/agreements/${testAgreementId}/messages`)
+      .set(auth())
+      .send({
+        sender_wallet: WALLET,
+        message: messageText,
+      })
+      .expect(201)
+      .expect(({ body }) => {
+        expect(body.error).toBeNull();
+        expect(body.message).toBeDefined();
+        expect(body.message.sender_id).toBe(USER_ID);
+        expect(body.message.sender_wallet).toBe(WALLET);
+        expect(body.message.message).toBe(messageText);
+        messageId = body.message.id;
+      });
+
+    // Participant (OTHER_USER_ID) can retrieve the message
+    await request(app.getHttpServer())
+      .get(`/v1/agreements/${testAgreementId}/messages`)
+      .set(auth(OTHER_USER_ID))
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.messages).toHaveLength(1);
+        expect(body.messages[0].id).toBe(messageId);
+        expect(body.messages[0].sender_id).toBe(USER_ID);
+        expect(body.messages[0].message).toBe(messageText);
+      });
+  });
+
+  it('participant can send a message and creator receives it', async () => {
+    // Create a new agreement for this test
+    const createRes = await request(app.getHttpServer())
+      .post('/v1/agreements')
+      .set(auth())
+      .send({
+        title: 'Chat test - participant sends',
+        amount: '100.00',
+        created_by: WALLET,
+        participants: [
+          { wallet_address: WALLET, role: 'payer' },
+          { wallet_address: OTHER_WALLET, role: 'payee' },
+        ],
+      });
+    expect(createRes.status).toBe(201);
+    const testAgreementId = createRes.body.agreement.id;
+
+    const messageText = `Test message from participant at ${Date.now()}`;
+    let messageId: string;
+
+    // Participant sends message
+    await request(app.getHttpServer())
+      .post(`/v1/agreements/${testAgreementId}/messages`)
+      .set(auth(OTHER_USER_ID))
+      .send({
+        sender_wallet: OTHER_WALLET,
+        message: messageText,
+      })
+      .expect(201)
+      .expect(({ body }) => {
+        expect(body.error).toBeNull();
+        expect(body.message).toBeDefined();
+        expect(body.message.sender_id).toBe(OTHER_USER_ID);
+        expect(body.message.sender_wallet).toBe(OTHER_WALLET);
+        messageId = body.message.id;
+      });
+
+    // Creator can retrieve the message
+    await request(app.getHttpServer())
+      .get(`/v1/agreements/${testAgreementId}/messages`)
+      .set(auth())
+      .expect(200)
+      .expect(({ body }) => {
+        const found = body.messages.find((m: any) => m.id === messageId);
+        expect(found).toBeDefined();
+        expect(found.sender_id).toBe(OTHER_USER_ID);
+        expect(found.message).toBe(messageText);
+      });
+  });
+
+  it('rejects empty messages', async () => {
+    await request(app.getHttpServer())
+      .post(`/v1/agreements/${AGREEMENT_ID}/messages`)
+      .set(auth())
+      .send({
+        sender_wallet: WALLET,
+        message: '   ',
+      })
+      .expect(400);
+  });
+
+  it('rejects messages from non-participants', async () => {
+    await request(app.getHttpServer())
+      .post(`/v1/agreements/${AGREEMENT_ID}/messages`)
+      .set(auth(RESOLVER_USER_ID))
+      .send({
+        sender_wallet: RESOLVER_WALLET,
+        message: 'Unauthorized message',
+      })
+      .expect(403);
+  });
+
+  it('rejects messages when sender_wallet does not match authenticated user', async () => {
+    await request(app.getHttpServer())
+      .post(`/v1/agreements/${AGREEMENT_ID}/messages`)
+      .set(auth())
+      .send({
+        sender_wallet: OTHER_WALLET,
+        message: 'Impersonation attempt',
+      })
+      .expect(403);
   });
 
   async function openAndAssignDispute() {
