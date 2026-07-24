@@ -40,11 +40,16 @@ function buildService(
       key === 'TRUSTLESS_WORK_WEBHOOK_SECRET' ? (deps.secret ?? SECRET) : def,
   };
 
+  const activity = {
+    logActivity: jest.fn().mockResolvedValue(undefined),
+  };
+
   const svc = new (WebhooksService as unknown as new (...args: unknown[]) => WebhooksService)(
     supabase,
     eventEmitter,
     notifications,
     config,
+    activity,
   ) as WebhooksService & { _emit: jest.Mock; _notifyDispute: jest.Mock };
 
   svc._emit = emit;
