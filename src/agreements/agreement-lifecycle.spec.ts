@@ -21,6 +21,7 @@ import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { AgreementsService } from './agreements.service';
+import { AgreementActivityService } from './agreement-activity.service';
 import { DisputesService } from '../disputes/disputes.service';
 import { UpdateAgreementStatusDto } from './dto/update-status.dto';
 import type { SupabaseService } from '../supabase/supabase.service';
@@ -392,9 +393,11 @@ describe('AgreementsService lifecycle enforcement (business rules)', () => {
   beforeEach(() => {
     db = new InMemoryDb();
     emit = jest.fn();
+    const activity = new AgreementActivityService(db as unknown as SupabaseService);
     service = new AgreementsService(
       db as unknown as SupabaseService,
       { emit } as unknown as EventEmitter2,
+      activity,
     );
   });
 
@@ -647,6 +650,114 @@ describe('AgreementsService lifecycle enforcement (business rules)', () => {
       ]);
     });
   });
+
+  describe('extended activity logging: previous/new state + milestone actions (issue #61)', () => {
+    it('records previous_state and new_state on a status transition', async () => {
+      const id = seedAgreement('pending');
+      await move(id, 'funded');
+
+      expect(db.activityFor(id)).toEqual([
+        expect.objectContaining({
+          action: 'status_changed_to_funded',
+          actor_wallet: PAYER_WALLET,
+          previous_state: 'pending',
+          new_state: 'funded',
+          details: expect.objectContaining({ from: 'pending', to: 'funded' }),
+        }),
+      ]);
+    });
+
+    it('records previous_state and new_state on a milestone transition', async () => {
+      const id = seedAgreement('active', {
+        milestones: [{ description: 'Build', amount: '100.00', status: 'pending' }],
+      });
+
+      const result = await service.updateMilestone(PAYER_USER, id, {
+        milestone_index: 0,
+        status: 'approved',
+        actor_wallet: PAYER_WALLET,
+      });
+
+      expect(result).toEqual({ success: true, error: null });
+      expect(db.activityFor(id)).toEqual([
+        expect.objectContaining({
+          action: 'milestone_approved',
+          previous_state: 'pending',
+          new_state: 'approved',
+        }),
+      ]);
+    });
+
+    it('logs the discrete milestone_rejected action with its state transition', async () => {
+      const id = seedAgreement('active', {
+        milestones: [{ description: 'Build', amount: '100.00', status: 'approved' }],
+      });
+
+      await service.updateMilestone(PAYER_USER, id, {
+        milestone_index: 0,
+        status: 'rejected',
+        actor_wallet: PAYER_WALLET,
+      });
+
+      expect(db.activityFor(id)).toEqual([
+        expect.objectContaining({
+          action: 'milestone_rejected',
+          previous_state: 'approved',
+          new_state: 'rejected',
+        }),
+      ]);
+    });
+
+    it('logs milestone_created per milestone at creation; non-transition entries keep null state', async () => {
+      const { agreement, error } = await service.create(PAYER_USER, {
+        created_by: PAYER_WALLET,
+        title: 'Agreement with milestones',
+        amount: '100.00',
+        participants: [
+          { wallet_address: PAYER_WALLET, role: 'payer' },
+          { wallet_address: PAYEE_WALLET, role: 'payee' },
+        ],
+        milestones: [
+          { description: 'Design', amount: '50.00', status: 'pending' },
+          { description: 'Build', amount: '50.00', status: 'pending' },
+        ],
+      });
+
+      expect(error).toBeNull();
+      const acts = db.activityFor(agreement!.id);
+      expect(acts.map((a: Row) => a.action)).toEqual([
+        'created',
+        'milestone_created',
+        'milestone_created',
+      ]);
+      // The generic 'created' entry is not a state transition.
+      expect(acts[0]).toEqual(
+        expect.objectContaining({ action: 'created', previous_state: null, new_state: null }),
+      );
+      expect(acts[1]).toEqual(
+        expect.objectContaining({
+          action: 'milestone_created',
+          new_state: 'pending',
+          details: expect.objectContaining({ milestone_index: 0 }),
+        }),
+      );
+    });
+
+    it('preserves the existing details payload (from/to) on transitions for backward compatibility', async () => {
+      const id = seedAgreement('pending');
+      await move(id, 'funded');
+
+      const entry = db.activityFor(id)[0];
+      // Existing consumers that read details.from / details.to keep working, and
+      // the new columns are additive.
+      expect(entry.details).toEqual(
+        expect.objectContaining({ status: 'funded', from: 'pending', to: 'funded' }),
+      );
+      expect(entry).toEqual(
+        expect.objectContaining({ previous_state: 'pending', new_state: 'funded' }),
+      );
+    });
+  });
 });
 
 describe('Dispute flows drive the agreement lifecycle', () => {
@@ -660,8 +771,9 @@ describe('Dispute flows drive the agreement lifecycle', () => {
     db = new InMemoryDb();
     emit = jest.fn();
     const emitter = { emit } as unknown as EventEmitter2;
-    agreements = new AgreementsService(db as unknown as SupabaseService, emitter);
-    disputes = new DisputesService(db as unknown as SupabaseService, agreements, emitter);
+    const activity = new AgreementActivityService(db as unknown as SupabaseService);
+    agreements = new AgreementsService(db as unknown as SupabaseService, emitter, activity);
+    disputes = new DisputesService(db as unknown as SupabaseService, agreements, emitter, activity);
 
     db.insert('agreements', {
       id: AGREEMENT_ID,
@@ -701,12 +813,57 @@ describe('Dispute flows drive the agreement lifecycle', () => {
     const disputeId = await openDispute();
 
     expect(db.agreement(AGREEMENT_ID).status).toBe('disputed');
+    // Shared side-effect path logs status_changed_to_* then dispute-specific action
     expect(db.activityFor(AGREEMENT_ID)).toEqual([
+      expect.objectContaining({
+        action: 'status_changed_to_disputed',
+        details: expect.objectContaining({
+          status: 'disputed',
+          from: 'active',
+          to: 'disputed',
+          dispute_id: disputeId,
+        }),
+      }),
       expect.objectContaining({
         action: 'dispute_opened',
         details: expect.objectContaining({ dispute_id: disputeId }),
       }),
     ]);
+  });
+
+  it('records dispute open/resolve in the agreement timeline with previous/new state (issue #61)', async () => {
+    const disputeId = await openDispute();
+    await disputes.assignResolver(PAYER_USER, disputeId, { resolver_wallet: RESOLVER_WALLET });
+    await disputes.resolveDispute(RESOLVER_USER, disputeId, {
+      resolved_by: RESOLVER_WALLET,
+      payer_percentage: 50,
+      payee_percentage: 50,
+      resolution_notes: 'Split evenly',
+    });
+
+    const timeline = db.activityFor(AGREEMENT_ID);
+    // Shared side-effect path also writes status_changed_to_* around dispute actions.
+    expect(timeline.map((a: Row) => a.action)).toEqual([
+      'status_changed_to_disputed',
+      'dispute_opened',
+      'dispute_resolver_assigned',
+      'status_changed_to_resolved',
+      'dispute_resolved',
+    ]);
+    expect(timeline.find((a: Row) => a.action === 'dispute_opened')).toEqual(
+      expect.objectContaining({
+        action: 'dispute_opened',
+        previous_state: 'active',
+        new_state: 'disputed',
+      }),
+    );
+    expect(timeline.find((a: Row) => a.action === 'dispute_resolved')).toEqual(
+      expect.objectContaining({
+        action: 'dispute_resolved',
+        previous_state: 'disputed',
+        new_state: 'resolved',
+      }),
+    );
   });
 
   it('outsiders cannot open disputes', async () => {
@@ -736,8 +893,10 @@ describe('Dispute flows drive the agreement lifecycle', () => {
     expect(db.agreement(AGREEMENT_ID).status).toBe('resolved');
     expect(db.agreement(AGREEMENT_ID).completed_at).toBeDefined();
     expect(db.activityFor(AGREEMENT_ID).map((a) => a.action)).toEqual([
+      'status_changed_to_disputed',
       'dispute_opened',
       'dispute_resolver_assigned',
+      'status_changed_to_resolved',
       'dispute_resolved',
     ]);
 

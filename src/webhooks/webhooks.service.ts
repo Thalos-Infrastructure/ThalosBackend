@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AgreementActivityService } from '../agreements/agreement-activity.service';
 import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
 import type { TrustlessWorkEventDto } from './dto/trustless-work-event.dto';
 
@@ -40,6 +41,7 @@ export class WebhooksService {
     private readonly eventEmitter: EventEmitter2,
     private readonly notifications: NotificationsService,
     private readonly config: ConfigService,
+    private readonly activity: AgreementActivityService,
   ) {
     this.webhookSecret = this.config.get<string>('TRUSTLESS_WORK_WEBHOOK_SECRET', '');
   }
@@ -172,7 +174,7 @@ export class WebhooksService {
 
     const row = updated;
 
-    await this.logActivity(
+    await this.activity.logActivity(
       row.id,
       'trustless-work-webhook',
       `webhook_status_changed_to_${targetStatus}`,
@@ -237,11 +239,16 @@ export class WebhooksService {
       throw updateError;
     }
 
-    await this.logActivity(agreement.id, 'trustless-work-webhook', 'webhook_milestone_updated', {
-      event: payload.event,
-      contractId: payload.contractId,
-      milestone_index: milestoneIndex,
-    });
+    await this.activity.logActivity(
+      agreement.id,
+      'trustless-work-webhook',
+      'webhook_milestone_updated',
+      {
+        event: payload.event,
+        contractId: payload.contractId,
+        milestone_index: milestoneIndex,
+      },
+    );
   }
 
   private async applyInfoUpdate(payload: TrustlessWorkEventDto): Promise<void> {
@@ -257,7 +264,7 @@ export class WebhooksService {
       return;
     }
 
-    await this.logActivity(
+    await this.activity.logActivity(
       agreement.id,
       'trustless-work-webhook',
       `webhook_event_${payload.event.replace('.', '_')}`,
@@ -300,24 +307,6 @@ export class WebhooksService {
       }
     } catch (err) {
       this.logger.error('Notification dispatch error', err);
-    }
-  }
-
-  private async logActivity(
-    agreementId: string,
-    actorWallet: string,
-    action: string,
-    details: Record<string, unknown> = {},
-  ) {
-    try {
-      await this.supabase.getClient().from('agreement_activity').insert({
-        agreement_id: agreementId,
-        actor_wallet: actorWallet,
-        action,
-        details,
-      });
-    } catch (e) {
-      this.logger.error('logActivity', e);
     }
   }
 }

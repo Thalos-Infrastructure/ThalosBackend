@@ -12,6 +12,7 @@ import { AuthModule } from '../auth/auth.module';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ApiClient } from '../common/api/api-client';
 import { AgreementsController } from '../agreements/agreements.controller';
+import { AgreementActivityService } from '../agreements/agreement-activity.service';
 import { AgreementsService } from '../agreements/agreements.service';
 import { AgreementChatController } from '../agreement-chat/agreement-chat.controller';
 import { AgreementChatService } from '../agreement-chat/agreement-chat.service';
@@ -349,7 +350,7 @@ describe('migrated backend flows (integration)', () => {
       ],
       providers: [
         AgreementsService,
-        AgreementChatService,
+        AgreementActivityService,
         DisputesService,
         WalletsService,
         { provide: SupabaseService, useValue: supabase },

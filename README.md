@@ -103,6 +103,7 @@ Next.js  ──/api/* (server)──►  NestJS (v1/*)  ──►  Supabase (Pos
 | `wallets` | Wallet linking |
 | `notifications` | Resend-based email notifications + HTML templates |
 | `internal-trustless` | Relay to Trustless Work + typed escrow read endpoints |
+| `verification` | KYC/KYB compliance status, aggregated across providers (single source of truth) |
 
 ## Authentication & security
 
@@ -127,6 +128,8 @@ The browser must call the Next.js frontend (`/api/...`), which forwards to this 
 | `GET\|POST\|PATCH /v1/agreements/*` | Bearer JWT | Agreement CRUD, milestones, status, activity |
 | `GET\|POST\|PATCH /v1/disputes/*` | Bearer JWT | Dispute lifecycle |
 | `GET /v1/users/search` | Bearer JWT | Profile search |
+| `GET /v1/verification/user/:id` | Bearer JWT (self/admin) or internal secret | Standardized KYC compliance status for a user. 403 unless the caller is the user, an admin, or an internal service |
+| `GET /v1/verification/business/:id` | Bearer JWT (admin) or internal secret | Standardized KYB compliance status for a business. 403 unless the caller is an admin or an internal service |
 | `GET\|POST\|DELETE /v1/contacts` | Bearer JWT | Contacts |
 | `POST /v1/internal/notifications/*` | Internal secret | Trigger transactional emails |
 
@@ -136,7 +139,17 @@ The Trustless Work relay only allows paths under `deployer/`, `escrow/`, and `he
 
 ## Database & migrations
 
-SQL migrations live under [`scripts/`](scripts). Apply them to the Supabase project before running the API.
+SQL migrations live under [`scripts/`](scripts), numbered in apply order. Apply them to the Supabase project before running the API. Numbers must be unique across open PRs — when two branches would claim the same number, the later one bumps to the next free number (this is why verifications is `004_create_verifications.sql`, clearing `002`/`003` used by the KYB, KYC and retry-queue migrations).
+
+### Verification as a single source of truth (`verifications` table)
+
+`scripts/004_create_verifications.sql` creates `public.verifications` — the standardized, provider-agnostic projection the Verification API (issue #74) reads from. It is intentionally **read/aggregation only**: this module never writes to it.
+
+For a subject to ever report as verified, the identity-provider flows must **upsert their outcome into `verifications`** (one row per subject + provider):
+
+- **KYB** (`src/kyb/`, table `kyb_verifications`) and **KYC** (issue #72 / #80) remain the systems of record for their own provider sessions.
+- On a terminal status change (verified / rejected / expired) they must sync a row into `verifications` — keyed `(subject_type, subject_id, provider)` — so downstream consumers (Agreements, Reputation, Enterprise) read one shape regardless of provider.
+- Until that write path exists, these endpoints correctly return `unverified`; they are not aggregating the legacy provider tables directly, by design (so #71 / #72 / #75 don't each invent a different status shape).
 
 ## Notifications (EventEmitter2)
 
