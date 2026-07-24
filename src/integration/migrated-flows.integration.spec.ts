@@ -708,6 +708,7 @@ describe('migrated backend flows (integration)', () => {
   });
 
   it('allows agreement creator and participants to list messages', async () => {
+    // Creator (USER_ID with WALLET) can list messages
     await request(app.getHttpServer())
       .get(`/v1/agreements/${AGREEMENT_ID}/messages`)
       .set(auth())
@@ -717,15 +718,18 @@ describe('migrated backend flows (integration)', () => {
         expect(body.error).toBeNull();
       });
 
-    // The initial AGREEMENT_ID has WALLET as creator and SECOND_WALLET as participant
-    // OTHER_USER_ID has SECOND_WALLET, so should be able to list
-    // Actually need to check: USER_ID (WALLET), OTHER_USER_ID has OTHER_WALLET
-    // The agreement has WALLET (creator) and SECOND_WALLET (participant, but belongs to USER_ID)
-    // So we need to test with a user that has SECOND_WALLET
-    // Let me test that creator can list
+    // Add a participant owned by OTHER_USER_ID to verify role-based access
+    supabase.tables.agreement_participants.push({
+      id: 'participant-test-other-user',
+      agreement_id: AGREEMENT_ID,
+      wallet_address: OTHER_WALLET,
+      role: 'payee',
+    });
+
+    // Participant (OTHER_USER_ID with OTHER_WALLET) can also list messages
     await request(app.getHttpServer())
       .get(`/v1/agreements/${AGREEMENT_ID}/messages`)
-      .set(auth(USER_ID))
+      .set(auth(OTHER_USER_ID))
       .expect(200)
       .expect(({ body }) => {
         expect(body.messages).toEqual([]);
