@@ -1,19 +1,16 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
-import { IIdentityProvider } from './interfaces/identity-provider.interface';
-import { MockKycProvider } from './providers/mock-kyc.provider';
+import { IIdentityProvider, KYC_PROVIDER } from './interfaces/identity-provider.interface';
 import { KycStatus, KycSession, KycVerificationRow } from './interfaces/kyc.types';
 
 @Injectable()
 export class KycService {
   private readonly logger = new Logger(KycService.name);
-  private readonly provider: IIdentityProvider;
 
   constructor(
     private readonly supabase: SupabaseService,
-    mockProvider: MockKycProvider,
+    @Inject(KYC_PROVIDER) private readonly provider: IIdentityProvider,
   ) {
-    this.provider = mockProvider;
     this.logger.log(`Initialized KYC service with provider: ${this.provider.name}`);
   }
 
@@ -54,7 +51,11 @@ export class KycService {
     };
   }
 
-  async getStatus(userId: string) {
+  async getStatus(userId: string, callerUserId?: string) {
+    if (callerUserId && callerUserId !== userId) {
+      throw new UnauthorizedException('You can only view your own KYC status');
+    }
+
     const { data, error } = await this.supabase
       .getClient()
       .from('kyc_verifications')

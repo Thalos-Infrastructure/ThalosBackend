@@ -26,10 +26,13 @@ export class MockKycProvider implements IIdentityProvider {
       createdAt,
     });
 
+    const sessionUrl = `https://mock-kyc.provider/verify/${providerVerificationId}`;
+
     this.logger.log(`Created KYC session ${providerVerificationId} for user ${input.userId}`);
 
     return Promise.resolve({
       providerVerificationId,
+      sessionUrl,
       metadata: { created_at: createdAt },
     });
   }

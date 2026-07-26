@@ -1,5 +1,7 @@
 import { KycStatus } from './kyc.types';
 
+export const KYC_PROVIDER = Symbol('KYC_PROVIDER');
+
 export interface CreateSessionInput {
   userId: string;
   metadata?: Record<string, unknown>;

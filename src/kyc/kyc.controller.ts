@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Param, Post, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthUserCtx } from '../auth/current-user.decorator';
@@ -8,7 +9,10 @@ import { CreateKycSessionDto, KycWebhookDto } from './dto/kyc.dto';
 @ApiTags('kyc')
 @Controller('kyc')
 export class KycController {
-  constructor(private readonly kycService: KycService) {}
+  constructor(
+    private readonly kycService: KycService,
+    private readonly config: ConfigService,
+  ) {}
 
   @Post('session')
   @UseGuards(JwtAuthGuard)
@@ -21,16 +25,29 @@ export class KycController {
   }
 
   @Get('status/:userId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('bearer')
   @ApiOperation({ summary: 'Get KYC verification status for a user' })
   @ApiResponse({ status: 200, description: 'KYC status retrieved' })
-  async getStatus(@Param('userId') userId: string) {
-    return this.kycService.getStatus(userId);
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden — you can only view your own KYC status' })
+  async getStatus(@CurrentUser() user: AuthUserCtx, @Param('userId') userId: string) {
+    return this.kycService.getStatus(userId, user.userId);
   }
 
   @Post('webhook')
+  @HttpCode(200)
   @ApiOperation({ summary: 'Receive KYC verification results from provider' })
-  @ApiResponse({ status: 201, description: 'Webhook processed' })
-  async handleWebhook(@Body() dto: KycWebhookDto) {
+  @ApiResponse({ status: 200, description: 'Webhook processed' })
+  @ApiResponse({ status: 401, description: 'Invalid or missing webhook secret' })
+  async handleWebhook(
+    @Body() dto: KycWebhookDto,
+    @Headers('x-kyc-webhook-secret') webhookSecret: string,
+  ) {
+    const expected = this.config.get<string>('KYC_WEBHOOK_SECRET');
+    if (!expected || !webhookSecret || webhookSecret !== expected) {
+      throw new UnauthorizedException('Invalid or missing KYC webhook secret');
+    }
     return this.kycService.handleWebhook(dto);
   }
 }
