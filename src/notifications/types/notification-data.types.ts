@@ -24,9 +24,12 @@ export interface EvidenceSubmittedData {
   agreementTitle: string;
   milestoneIndex: number;
   milestoneDescription: string;
+  milestoneAmount: string;
+  asset: string;
   submittedByWallet: string;
   submittedByName?: string;
   evidenceDescription?: string;
+  evidenceUrls?: string[];
 }
 
 export interface MilestoneApprovedData {

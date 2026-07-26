@@ -3,3 +3,6 @@ dist
 .env
 .env.local
 *.log
+
+# Permitir subir el archivo de ejemplo (solo placeholders, sin secretos)
+!.env.example

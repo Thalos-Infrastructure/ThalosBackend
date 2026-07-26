@@ -1,17 +1,9 @@
-import {
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from "@nestjs/common";
-import { SupabaseService } from "../supabase/supabase.service";
-import {
-  GetOrCreateProfileDto,
-  UpdateProfileDto,
-  SetUserRoleDto,
-} from "./dto/profiles.dto";
+import { ForbiddenException, Injectable } from '@nestjs/common';
+import { SupabaseService } from '../supabase/supabase.service';
+import { GetOrCreateProfileDto, UpdateProfileDto, SetUserRoleDto } from './dto/profiles.dto';
 
-export type ProfileRole = "user" | "validator" | "dispute_resolver" | "admin";
-export type AccountType = "personal" | "enterprise";
+export type ProfileRole = 'user' | 'validator' | 'dispute_resolver' | 'admin';
+export type AccountType = 'personal' | 'enterprise';
 
 export interface Profile {
   id: string;
@@ -32,9 +24,9 @@ export class ProfilesService {
   private async walletForUserId(userId: string): Promise<string | null> {
     const { data, error } = await this.supabase
       .getClient()
-      .from("auth_users")
-      .select("wallet_public_key")
-      .eq("id", userId)
+      .from('auth_users')
+      .select('wallet_public_key')
+      .eq('id', userId)
       .maybeSingle();
     if (error || !data?.wallet_public_key) return null;
     return data.wallet_public_key as string;
@@ -43,7 +35,7 @@ export class ProfilesService {
   private async assertActorWallet(userId: string, actorWallet: string) {
     const w = await this.walletForUserId(userId);
     if (!w || w !== actorWallet) {
-      throw new ForbiddenException("Wallet does not match authenticated user");
+      throw new ForbiddenException('Wallet does not match authenticated user');
     }
   }
 
@@ -53,9 +45,9 @@ export class ProfilesService {
     // First, try to get existing profile
     const { data: existingProfile, error: fetchError } = await this.supabase
       .getClient()
-      .from("profiles")
-      .select("*")
-      .eq("wallet_address", dto.wallet_address)
+      .from('profiles')
+      .select('*')
+      .eq('wallet_address', dto.wallet_address)
       .maybeSingle();
 
     if (existingProfile) {
@@ -63,17 +55,17 @@ export class ProfilesService {
     }
 
     // Profile doesn't exist, create one
-    if (fetchError && fetchError.code !== "PGRST116") {
+    if (fetchError && fetchError.code !== 'PGRST116') {
       return { profile: null, error: fetchError.message };
     }
 
     const { data: newProfile, error: insertError } = await this.supabase
       .getClient()
-      .from("profiles")
+      .from('profiles')
       .insert({
         wallet_address: dto.wallet_address,
-        account_type: dto.account_type || "personal",
-        role: "user",
+        account_type: dto.account_type || 'personal',
+        role: 'user',
       })
       .select()
       .single();
@@ -88,12 +80,12 @@ export class ProfilesService {
   async getByWallet(walletAddress: string) {
     const { data, error } = await this.supabase
       .getClient()
-      .from("profiles")
-      .select("*")
-      .eq("wallet_address", walletAddress)
+      .from('profiles')
+      .select('*')
+      .eq('wallet_address', walletAddress)
       .maybeSingle();
 
-    if (error && error.code !== "PGRST116") {
+    if (error && error.code !== 'PGRST116') {
       return { profile: null, error: error.message };
     }
 
@@ -105,12 +97,12 @@ export class ProfilesService {
 
     const { data, error } = await this.supabase
       .getClient()
-      .from("profiles")
+      .from('profiles')
       .update({
         ...dto,
         updated_at: new Date().toISOString(),
       })
-      .eq("wallet_address", walletAddress)
+      .eq('wallet_address', walletAddress)
       .select()
       .single();
 
@@ -124,10 +116,10 @@ export class ProfilesService {
   async getByRole(role: ProfileRole) {
     const { data, error } = await this.supabase
       .getClient()
-      .from("profiles")
-      .select("*")
-      .eq("role", role)
-      .order("created_at", { ascending: false });
+      .from('profiles')
+      .select('*')
+      .eq('role', role)
+      .order('created_at', { ascending: false });
 
     if (error) {
       return { profiles: [], error: error.message };
@@ -140,25 +132,25 @@ export class ProfilesService {
     // Check if current user is admin
     const currentWallet = await this.walletForUserId(userId);
     if (!currentWallet) {
-      throw new ForbiddenException("No wallet on profile");
+      throw new ForbiddenException('No wallet on profile');
     }
 
     const { data: currentProfile } = await this.supabase
       .getClient()
-      .from("profiles")
-      .select("role")
-      .eq("wallet_address", currentWallet)
+      .from('profiles')
+      .select('role')
+      .eq('wallet_address', currentWallet)
       .maybeSingle();
 
-    if (!currentProfile || currentProfile.role !== "admin") {
-      throw new ForbiddenException("Only admins can change user roles");
+    if (!currentProfile || currentProfile.role !== 'admin') {
+      throw new ForbiddenException('Only admins can change user roles');
     }
 
     const { error } = await this.supabase
       .getClient()
-      .from("profiles")
+      .from('profiles')
       .update({ role: dto.role, updated_at: new Date().toISOString() })
-      .eq("wallet_address", dto.wallet_address);
+      .eq('wallet_address', dto.wallet_address);
 
     if (error) {
       return { success: false, error: error.message };
@@ -168,10 +160,10 @@ export class ProfilesService {
   }
 
   async getDisputeResolvers() {
-    return this.getByRole("dispute_resolver");
+    return this.getByRole('dispute_resolver');
   }
 
   async getValidators() {
-    return this.getByRole("validator");
+    return this.getByRole('validator');
   }
 }

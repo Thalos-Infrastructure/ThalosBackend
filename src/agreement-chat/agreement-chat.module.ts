@@ -1,7 +1,7 @@
-import { Module } from "@nestjs/common";
-import { SupabaseModule } from "../supabase/supabase.module";
-import { AgreementChatController } from "./agreement-chat.controller";
-import { AgreementChatService } from "./agreement-chat.service";
+import { Module } from '@nestjs/common';
+import { SupabaseModule } from '../supabase/supabase.module';
+import { AgreementChatController } from './agreement-chat.controller';
+import { AgreementChatService } from './agreement-chat.service';
 
 @Module({
   imports: [SupabaseModule],

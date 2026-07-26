@@ -8,5 +8,6 @@ Este documento fija las decisiones del plan sin modificar el archivo de plan ori
 | Nest vs Next | **Híbrido**: Trustless Work se invoca desde el navegador vía **ruta API en Next** que reenvía a Nest con secreto interno (así usuarios solo-wallet no exponen claves). Acuerdos, búsqueda de usuarios y contactos se exponen en Nest con **JWT de aplicación** (`JWT_SECRET`, mismo que `/api/auth/me`). |
 | Nombre / apellido | Sin migración SQL: búsqueda sobre **`display_name`**, `email` y `wallet_address` (paridad con `searchThalosUsers`). |
 | Trustless Work | El **usuario sigue firmando** en el cliente (XDR); Nest solo añade `x-api-key` y reenvía a la API de Trustless Work. |
+| Notificaciones por evento | **EventEmitter2** en proceso: `DisputesService` emite `dispute.opened` / `dispute.resolved` y `NotificationsService` los escucha con `@OnEvent`. Sin acoplamiento directo entre módulos. |
 
-Variables relevantes: ver [`.env.example`](../.env.example) en la raíz del backend.
+Variables relevantes: ver [`.env.example`](../.env.example) en la raíz del backend. Eventos de notificación definidos en [`src/common/constants/notification-events.ts`](../src/common/constants/notification-events.ts).

@@ -1,0 +1,30 @@
+version: 2
+updates:
+  # App dependencies (Dependabot reads pnpm-lock.yaml under the "npm" ecosystem).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      # One grouped PR for all @nestjs/* bumps (they release in lockstep).
+      nestjs:
+        patterns:
+          - "@nestjs/*"
+      # One grouped PR for dev-dependency minor/patch bumps to cut noise.
+      dev-minor-patch:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Keep GitHub Actions (checkout, setup-node, pnpm/action-setup, …) up to date.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "github-actions"

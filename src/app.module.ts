@@ -1,23 +1,33 @@
-import { Module } from "@nestjs/common";
-import { ConfigModule } from "@nestjs/config";
-import { AuthModule } from "./auth/auth.module";
-import { SupabaseModule } from "./supabase/supabase.module";
-import { InternalTrustlessModule } from "./internal-trustless/internal-trustless.module";
-import { AgreementsModule } from "./agreements/agreements.module";
-import { UsersModule } from "./users/users.module";
-import { ContactsModule } from "./contacts/contacts.module";
-import { RootController } from "./root.controller";
-import { NotificationsModule } from "./notifications/notifications.module";
-import { AgreementChatModule } from "./agreement-chat/agreement-chat.module";
-import { DisputesModule } from "./disputes/disputes.module";
-import { ProfilesModule } from "./profiles/profiles.module";
-import { WalletsModule } from "./wallets/wallets.module";
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { CommonModule } from './common/common.module';
+import { AuthModule } from './auth/auth.module';
+import { SupabaseModule } from './supabase/supabase.module';
+import { InternalTrustlessModule } from './internal-trustless/internal-trustless.module';
+import { AgreementsModule } from './agreements/agreements.module';
+import { UsersModule } from './users/users.module';
+import { ContactsModule } from './contacts/contacts.module';
+import { RootController } from './root.controller';
+import { NotificationsModule } from './notifications/notifications.module';
+import { AgreementChatModule } from './agreement-chat/agreement-chat.module';
+import { DisputesModule } from './disputes/disputes.module';
+import { ProfilesModule } from './profiles/profiles.module';
+import { WalletsModule } from './wallets/wallets.module';
+import { EventsModule } from './events/events.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
+import { RetryQueueModule } from './retry-queue/retry-queue.module';
+import { VerificationModule } from './verification/verification.module';
+import { KybModule } from './kyb/kyb.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env.local', '.env'] }),
+    EventEmitterModule.forRoot(),
+    CommonModule,
     SupabaseModule,
     AuthModule,
+    RetryQueueModule,
     InternalTrustlessModule,
     AgreementsModule,
     UsersModule,
@@ -27,6 +37,10 @@ import { WalletsModule } from "./wallets/wallets.module";
     DisputesModule,
     ProfilesModule,
     WalletsModule,
+    EventsModule,
+    WebhooksModule,
+    VerificationModule,
+    KybModule,
   ],
   controllers: [RootController],
 })
