@@ -25,7 +25,7 @@ export function baseTemplate(content: string): string {
                       Thalos
                     </h1>
                     <p style="margin: 4px 0 0; font-size: 14px; color: rgba(255,255,255,0.8);">
-                      Trustless Agreements on Solana
+                      Trustless Agreements on Stellar
                     </p>
                   </td>
                 </tr>
