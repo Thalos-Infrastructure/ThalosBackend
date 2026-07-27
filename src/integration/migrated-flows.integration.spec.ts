@@ -20,6 +20,10 @@ import { DisputesService } from '../disputes/disputes.service';
 import { EscrowsController } from '../internal-trustless/escrows.controller';
 import { WalletsController } from '../wallets/wallets.controller';
 import { WalletsService } from '../wallets/wallets.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
+import { RetryQueueService } from '../retry-queue/retry-queue.service';
+import { AgreementChatController } from '../agreement-chat/agreement-chat.controller';
+import { AgreementChatService } from '../agreement-chat/agreement-chat.service';
 
 // WalletsService transitively imports @stellar/stellar-sdk, which ships ESM that
 // ts-jest does not transform. The migrated flows under test never exercise
@@ -142,8 +146,20 @@ class QueryBuilder implements PromiseLike<QueryResult> {
   }
 
   private executeUpdate(): QueryResult {
+    const matched = this.db.select(this.table, this.filters);
     this.db.update(this.table, this.filters, this.payload);
-    return { data: null, error: null };
+    const ids = matched.map((r) => r.id);
+    const updated =
+      ids.length > 0
+        ? this.db.select(this.table, [{ key: 'id', op: 'in', value: ids }], this.selected)
+        : [];
+    const data =
+      this.resultMode === 'maybeSingle'
+        ? (updated[0] ?? null)
+        : this.resultMode === 'single'
+          ? (updated[0] ?? null)
+          : updated;
+    return { data, error: null };
   }
 
   private executeDelete(): QueryResult {
@@ -351,17 +367,30 @@ describe('migrated backend flows (integration)', () => {
     supabase = new InMemorySupabase();
     const moduleRef = await Test.createTestingModule({
       imports: [AuthModule],
-      controllers: [AgreementsController, DisputesController, EscrowsController, WalletsController],
+      controllers: [
+        AgreementsController,
+        DisputesController,
+        EscrowsController,
+        WalletsController,
+        AgreementChatController,
+      ],
       providers: [
         AgreementsService,
         AgreementActivityService,
         DisputesService,
         WalletsService,
+        AgreementChatService,
         { provide: SupabaseService, useValue: supabase },
         { provide: ApiClient, useValue: apiClient },
         { provide: ConfigService, useValue: { get: jest.fn(() => JWT_SECRET) } },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
-        { provide: AgreementsBackendClient, useValue: backendClient },
+        {
+          provide: RetryQueueService,
+          useValue: {
+            enqueue: jest.fn().mockResolvedValue({ id: 'job-1' }),
+            registerHandler: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -1180,7 +1209,7 @@ describe('migrated backend flows (integration)', () => {
         .send({ status: 'completed', actor_wallet: OTHER_WALLET })
         .expect(403);
 
-      // 400: Invalid transition (completed status when milestones are not approved)
+      // 409: Invalid transition (completed status when milestones are not approved)
       // Note: At this point status is 'in_review', but milestone is 'pending'.
       // Trying to transition to completed should fail because milestonesSatisfyCompletion returns false.
       await request(app.getHttpServer())
@@ -1331,6 +1360,288 @@ describe('migrated backend flows (integration)', () => {
         .set(auth(OTHER_USER_ID))
         .expect(403);
     });
+  });
+
+  describe('standardized error contract on invalid agreement creation', () => {
+    it('rejects a payload with invalid amount and returns { success: false, error: { code, details } }', async () => {
+      await request(app.getHttpServer())
+        .post('/v1/agreements')
+        .set(auth())
+        .send({
+          title: 'Bad amount agreement',
+          amount: '0.00',
+          asset: 'USDC',
+          created_by: WALLET,
+          participants: [{ wallet_address: WALLET, role: 'payer' }],
+        })
+        .expect(400)
+        .expect(({ body }) => {
+          expect(body.success).toBe(false);
+          expect(body.error).toBeDefined();
+          expect(body.error.code).toBe('VALIDATION_ERROR');
+          expect(Array.isArray(body.error.details)).toBe(true);
+          expect(body.error.details.length).toBeGreaterThan(0);
+          const amountError = body.error.details.find(
+            (d: { field: string }) => d.field === 'amount',
+          );
+          expect(amountError).toBeDefined();
+          expect(amountError.code).toBe('INVALID_AMOUNT');
+        });
+    });
+
+    it('rejects a payload with milestone-sum mismatch and returns standardized error', async () => {
+      await request(app.getHttpServer())
+        .post('/v1/agreements')
+        .set(auth())
+        .send({
+          title: 'Milestone mismatch agreement',
+          amount: '100.00',
+          asset: 'USDC',
+          agreement_type: 'multi',
+          created_by: WALLET,
+          participants: [{ wallet_address: WALLET, role: 'payer' }],
+          milestones: [
+            { description: 'Design', amount: '70.00', status: 'pending' },
+            { description: 'Build', amount: '40.00', status: 'pending' },
+          ],
+        })
+        .expect(400)
+        .expect(({ body }) => {
+          expect(body.success).toBe(false);
+          expect(body.error).toBeDefined();
+          expect(body.error.code).toBe('VALIDATION_ERROR');
+          expect(Array.isArray(body.error.details)).toBe(true);
+          const sumError = body.error.details.find(
+            (d: { code: string }) => d.code === 'MILESTONE_SUM_MISMATCH',
+          );
+          expect(sumError).toBeDefined();
+        });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Validator reuse — disputes
+  // ---------------------------------------------------------------------------
+  describe('validator reuse — disputes', () => {
+    const PENDING_AGR_ID = '550e8400-e29b-41d4-a716-446655440100';
+    const CANCEL_AGR_ID = '550e8400-e29b-41d4-a716-446655440101';
+
+    it('rejects opening a dispute on agreement with status pending (pending → disputed is invalid)', async () => {
+      supabase.tables.agreements.push({
+        id: PENDING_AGR_ID,
+        contract_id: 'contract-pending-reuse',
+        title: 'Pending reuse agreement',
+        description: 'For testing invalid transition',
+        amount: '100.00',
+        asset: 'USDC',
+        status: 'pending',
+        created_by: WALLET,
+        milestones: [],
+        metadata: {},
+        created_at: '2026-06-01T00:00:00.000Z',
+        updated_at: '2026-06-01T00:00:00.000Z',
+      });
+      supabase.tables.agreement_participants.push(
+        {
+          id: 'pending-reuse-part-1',
+          agreement_id: PENDING_AGR_ID,
+          wallet_address: WALLET,
+          role: 'payer',
+        },
+        {
+          id: 'pending-reuse-part-2',
+          agreement_id: PENDING_AGR_ID,
+          wallet_address: SECOND_WALLET,
+          role: 'payee',
+        },
+      );
+
+      await request(app.getHttpServer())
+        .post('/v1/disputes')
+        .set(auth())
+        .send({
+          agreement_id: PENDING_AGR_ID,
+          opened_by: WALLET,
+          reason: 'Should not be allowed',
+        })
+        .expect(400);
+
+      const agreement = supabase.tables.agreements.find((a) => a.id === PENDING_AGR_ID);
+      expect(agreement?.status).toBe('pending');
+    });
+
+    it('rejects cancelling a dispute when agreement validation fails', async () => {
+      supabase.tables.agreements.push({
+        id: CANCEL_AGR_ID,
+        contract_id: 'contract-cancel-reuse',
+        title: 'Cancel reuse agreement',
+        description: 'For testing cancel with invalid status',
+        amount: '100.00',
+        asset: 'USDC',
+        status: 'active',
+        created_by: WALLET,
+        milestones: [],
+        metadata: {},
+        created_at: '2026-06-01T00:00:00.000Z',
+        updated_at: '2026-06-01T00:00:00.000Z',
+      });
+      supabase.tables.agreement_participants.push(
+        {
+          id: 'cancel-reuse-part-1',
+          agreement_id: CANCEL_AGR_ID,
+          wallet_address: WALLET,
+          role: 'payer',
+        },
+        {
+          id: 'cancel-reuse-part-2',
+          agreement_id: CANCEL_AGR_ID,
+          wallet_address: SECOND_WALLET,
+          role: 'payee',
+        },
+      );
+
+      const opened = await request(app.getHttpServer())
+        .post('/v1/disputes')
+        .set(auth())
+        .send({
+          agreement_id: CANCEL_AGR_ID,
+          opened_by: WALLET,
+          reason: 'Cancel test',
+        })
+        .expect(201);
+      const disputeId = opened.body.dispute.id;
+
+      supabase.tables.agreements = supabase.tables.agreements.map((a) =>
+        a.id === CANCEL_AGR_ID ? { ...a, status: 'active' } : a,
+      );
+
+      await request(app.getHttpServer())
+        .patch(`/v1/disputes/${disputeId}/cancel`)
+        .set(auth())
+        .send({ cancelled_by: WALLET })
+        .expect(400);
+
+      const agreement = supabase.tables.agreements.find((a) => a.id === CANCEL_AGR_ID);
+      expect(agreement?.status).toBe('active');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Validator reuse — webhooks
+  // ---------------------------------------------------------------------------
+  describe('validator reuse — webhooks', () => {
+    let svc: WebhooksService;
+    let emit: jest.Mock;
+    let notifyDispute: jest.Mock;
+
+    beforeEach(() => {
+      emit = jest.fn();
+      notifyDispute = jest.fn().mockResolvedValue(undefined);
+      const eventEmitter = { emit };
+      const notifications = { notifyDisputeOpened: notifyDispute };
+      const config = { get: jest.fn(() => 'test-webhook-secret') };
+
+      let registeredHandler: (payload: unknown, attempt: number) => Promise<void>;
+      const retryQueue = {
+        enqueue: jest.fn().mockImplementation(async (_type: string, payload: unknown) => {
+          if (registeredHandler) await registeredHandler(payload, 1);
+          return { id: 'webhook-job-1' };
+        }),
+        registerHandler: jest
+          .fn()
+          .mockImplementation(
+            (_type: string, fn: (payload: unknown, attempt: number) => Promise<void>) => {
+              registeredHandler = fn;
+            },
+          ),
+      };
+      const activity = { logActivity: jest.fn().mockResolvedValue(undefined) };
+      svc = new (WebhooksService as unknown as new (...args: unknown[]) => WebhooksService)(
+        supabase,
+        eventEmitter,
+        notifications,
+        config,
+        retryQueue,
+        activity,
+      );
+      svc.onModuleInit();
+    });
+
+    it('rejects an invalid transition (pending → disputed) and does not mutate DB', async () => {
+      const contractId = 'wh-reject-1';
+      supabase.tables.agreements.push({
+        id: 'wh-reject-agr',
+        contract_id: contractId,
+        title: 'Wh reject test',
+        description: 'Reject test',
+        amount: '100.00',
+        asset: 'USDC',
+        status: 'pending',
+        created_by: WALLET,
+        milestones: [],
+        metadata: {},
+        created_at: '2026-06-01T00:00:00.000Z',
+        updated_at: '2026-06-01T00:00:00.000Z',
+      });
+
+      const result = await svc.handleEvent({ event: 'escrow.disputed', contractId });
+
+      expect(result).toEqual({ handled: true });
+      const agreement = supabase.tables.agreements.find((a) => a.contract_id === contractId);
+      expect(agreement?.status).toBe('pending');
+      expect(emit).not.toHaveBeenCalled();
+      expect(notifyDispute).not.toHaveBeenCalled();
+    });
+
+    it('accepts a valid transition (pending → funded) and updates DB', async () => {
+      const contractId = 'wh-accept-1';
+      supabase.tables.agreements.push({
+        id: 'wh-accept-agr',
+        contract_id: contractId,
+        title: 'Wh accept test',
+        description: 'Accept test',
+        amount: '100.00',
+        asset: 'USDC',
+        status: 'pending',
+        created_by: WALLET,
+        milestones: [],
+        metadata: {},
+        created_at: '2026-06-01T00:00:00.000Z',
+        updated_at: '2026-06-01T00:00:00.000Z',
+      });
+      supabase.tables.agreement_activity = [];
+
+      const result = await svc.handleEvent({ event: 'escrow.funded', contractId });
+
+      expect(result).toEqual({ handled: true });
+      const agreement = supabase.tables.agreements.find((a) => a.contract_id === contractId);
+      expect(agreement?.status).toBe('funded');
+      expect(emit).toHaveBeenCalledWith(
+        'agreement.funded',
+        expect.objectContaining({ agreementId: 'wh-accept-agr' }),
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // updateMilestone — happy path
+  // ---------------------------------------------------------------------------
+  it('updateMilestone: updates milestone status and triggers consistency check', async () => {
+    await request(app.getHttpServer())
+      .patch(`/v1/agreements/${AGREEMENT_ID}/milestones`)
+      .set(auth())
+      .send({
+        milestone_index: 0,
+        status: 'approved',
+        actor_wallet: WALLET,
+      })
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.success).toBe(true);
+      });
+
+    const agreement = supabase.tables.agreements.find((a) => a.id === AGREEMENT_ID);
+    expect(agreement?.milestones[0].status).toBe('approved');
   });
 });
 

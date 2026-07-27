@@ -1,9 +1,15 @@
+import { AGREEMENT_EVENTS } from './events/agreement-events.constants';
+
+/**
+ * Thin re-export of the canonical lifecycle event names.
+ * Prefer importing AGREEMENT_EVENTS from agreement-events.constants directly.
+ */
 export const DomainEvents = {
-  AGREEMENT_CREATED: 'agreement.created',
-  AGREEMENT_FUNDED: 'agreement.funded',
-  AGREEMENT_COMPLETED: 'agreement.completed',
-  MILESTONE_APPROVED: 'milestone.approved',
-  EVIDENCE_SUBMITTED: 'evidence.submitted',
-  DISPUTE_OPENED: 'dispute.opened',
-  DISPUTE_RESOLVED: 'dispute.resolved',
+  AGREEMENT_CREATED: AGREEMENT_EVENTS.CREATED,
+  AGREEMENT_FUNDED: AGREEMENT_EVENTS.FUNDED,
+  AGREEMENT_COMPLETED: AGREEMENT_EVENTS.COMPLETED,
+  MILESTONE_APPROVED: AGREEMENT_EVENTS.MILESTONE_APPROVED,
+  EVIDENCE_SUBMITTED: AGREEMENT_EVENTS.EVIDENCE_SUBMITTED,
+  DISPUTE_OPENED: AGREEMENT_EVENTS.DISPUTE_OPENED,
+  DISPUTE_RESOLVED: AGREEMENT_EVENTS.DISPUTE_RESOLVED,
 } as const;

@@ -1,4 +1,6 @@
-# Migrated Flow Integration Tests
+# Integration Tests
+
+## Migrated Flow Integration Tests
 
 The migrated backend flows are covered by `src/integration/migrated-flows.integration.spec.ts`.
 These tests compile the Nest controllers/services and exercise them over HTTP with `supertest`.
@@ -29,6 +31,14 @@ the staging user/wallet shape expected by the frontend login flow:
 
 Trustless Work read calls are mocked with `global.fetch`, so CI does not require a Trustless Work
 API key or network access. Keep live staging checks in smoke tests where credentials are available.
+
+## Retry Queue Integration Tests
+
+`src/integration/retry-queue.integration.spec.ts` covers the shared Trustless Work retry queue
+(`src/retry-queue`) end-to-end: a mocked failing Trustless Work call retried to recovery, duplicate
+idempotency-key blocking, and the admin-only `POST /v1/retry-queue/:id/retry` HTTP endpoint (including
+the 403 rejection for non-admin users). It uses the same in-memory Supabase fixture pattern as the
+migrated-flows suite, extended with the `lte` filter the retry queue's polling queries need.
 
 ## Running Locally
 
