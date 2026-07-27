@@ -2,12 +2,22 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { NotificationsService } from './notifications.service';
 import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
+import type {
+  DisputeOpenedEventPayload,
+  DisputeResolvedEventPayload,
+} from '../common/constants/notification-events';
 import {
   AgreementCreatedData,
   AgreementFundedData,
   AgreementCompletedData,
+  EvidenceSubmittedData,
+  MilestoneApprovedData,
 } from './types/notification-data.types';
 
+/**
+ * Sole @OnEvent subscriber for agreement lifecycle email notifications.
+ * Keeps request paths resilient: handler failures are logged and never rethrown.
+ */
 @Injectable()
 export class NotificationsListener {
   private readonly logger = new Logger(NotificationsListener.name);
@@ -38,6 +48,42 @@ export class NotificationsListener {
       await this.notifications.notifyAgreementCompleted(data);
     } catch (err) {
       this.logger.error('handleAgreementCompleted failed', err);
+    }
+  }
+
+  @OnEvent(AGREEMENT_EVENTS.EVIDENCE_SUBMITTED)
+  async handleEvidenceSubmitted(data: EvidenceSubmittedData): Promise<void> {
+    try {
+      await this.notifications.notifyEvidenceSubmitted(data, data.submittedByWallet);
+    } catch (err) {
+      this.logger.error('handleEvidenceSubmitted failed', err);
+    }
+  }
+
+  @OnEvent(AGREEMENT_EVENTS.MILESTONE_APPROVED)
+  async handleMilestoneApproved(data: MilestoneApprovedData): Promise<void> {
+    try {
+      await this.notifications.notifyMilestoneApproved(data);
+    } catch (err) {
+      this.logger.error('handleMilestoneApproved failed', err);
+    }
+  }
+
+  @OnEvent(AGREEMENT_EVENTS.DISPUTE_OPENED)
+  async handleDisputeOpened(payload: DisputeOpenedEventPayload): Promise<void> {
+    try {
+      await this.notifications.handleDisputeOpened(payload);
+    } catch (err) {
+      this.logger.error('handleDisputeOpened failed', err);
+    }
+  }
+
+  @OnEvent(AGREEMENT_EVENTS.DISPUTE_RESOLVED)
+  async handleDisputeResolved(payload: DisputeResolvedEventPayload): Promise<void> {
+    try {
+      await this.notifications.handleDisputeResolved(payload);
+    } catch (err) {
+      this.logger.error('handleDisputeResolved failed', err);
     }
   }
 }

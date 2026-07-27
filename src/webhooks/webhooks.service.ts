@@ -1,16 +1,28 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AgreementActivityService } from '../agreements/agreement-activity.service';
 import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
+import { validateTransition } from '../agreements/agreement.validator';
+import { RetryQueueService } from '../retry-queue/retry-queue.service';
+import { RetryJobType } from '../retry-queue/retry-queue.types';
 import type { TrustlessWorkEventDto } from './dto/trustless-work-event.dto';
 
 interface EventConfig {
   action: 'status_update' | 'milestone_update' | 'info';
   targetStatus?: string;
 }
+
+type WebhookJobPayload = {
+  payload: TrustlessWorkEventDto;
+  config: EventConfig;
+  // Index signature so this shape satisfies RetryQueueService.enqueue()'s
+  // `TPayload extends Record<string, unknown>` constraint.
+  [key: string]: unknown;
+};
 
 const TW_EVENT_MAP: Record<string, EventConfig> = {
   'escrow.funded': { action: 'status_update', targetStatus: 'funded' },
@@ -29,19 +41,27 @@ const TW_EVENT_MAP: Record<string, EventConfig> = {
 };
 
 @Injectable()
-export class WebhooksService {
+export class WebhooksService implements OnModuleInit {
   private readonly logger = new Logger(WebhooksService.name);
   private readonly webhookSecret: string;
-  private readonly maxRetries = 3;
-  private readonly baseRetryDelay = 1_000;
 
   constructor(
     private readonly supabase: SupabaseService,
     private readonly eventEmitter: EventEmitter2,
     private readonly notifications: NotificationsService,
     private readonly config: ConfigService,
+    private readonly retryQueue: RetryQueueService,
+    private readonly activity: AgreementActivityService,
   ) {
     this.webhookSecret = this.config.get<string>('TRUSTLESS_WORK_WEBHOOK_SECRET', '');
+  }
+
+  onModuleInit(): void {
+    // The retry queue's poller drives every attempt from here on — see enqueue() below.
+    this.retryQueue.registerHandler<WebhookJobPayload>(
+      RetryJobType.WEBHOOK_EVENT_PROCESSING,
+      (job) => this.processEvent(job.payload, job.config),
+    );
   }
 
   verifySignature(rawBody: Buffer, signatureHeader: string): boolean {
@@ -72,42 +92,26 @@ export class WebhooksService {
       return { handled: false, reason: 'unhandled_event_type' };
     }
 
-    try {
-      await this.withRetry(() => this.processEvent(payload, config), payload.event);
-      return { handled: true };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(
-        `Failed to process event "${payload.event}" for contractId="${payload.contractId}" ` +
-          `after ${this.maxRetries} retries — ${message}`,
-      );
-      return { handled: false, reason: 'processing_failed' };
-    }
+    // Enqueue and ACK immediately — the shared retry queue's poller drives the actual
+    // attempts (with backoff/persistence), so we don't hold this HTTP request open.
+    const idempotencyKey = this.buildIdempotencyKey(payload);
+    await this.retryQueue.enqueue<WebhookJobPayload>(
+      RetryJobType.WEBHOOK_EVENT_PROCESSING,
+      { payload, config },
+      idempotencyKey,
+    );
+    return { handled: true };
   }
 
-  private async withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
-    let lastError: Error | null = null;
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-      try {
-        return await fn();
-      } catch (error: unknown) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : error && typeof error === 'object' && 'message' in error
-              ? String(error.message)
-              : String(error);
-        lastError = error instanceof Error ? error : new Error(message);
-        if (attempt < this.maxRetries) {
-          const delay = this.baseRetryDelay * 2 ** attempt;
-          this.logger.warn(
-            `Retrying "${label}" (attempt ${attempt + 1}/${this.maxRetries}) after ${delay}ms — ${lastError.message}`,
-          );
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-      }
-    }
-    throw lastError ?? new Error(`"${label}" failed after ${this.maxRetries} retries`);
+  // Trustless Work webhook payloads carry no event id, so duplicate deliveries of the
+  // same event are deduped by hashing the payload itself.
+  private buildIdempotencyKey(payload: TrustlessWorkEventDto): string {
+    const hash = crypto
+      .createHash('sha256')
+      .update(JSON.stringify(payload))
+      .digest('hex')
+      .slice(0, 16);
+    return `webhook:${payload.contractId}:${payload.event}:${hash}`;
   }
 
   private async processEvent(payload: TrustlessWorkEventDto, config: EventConfig): Promise<void> {
@@ -128,6 +132,41 @@ export class WebhooksService {
     payload: TrustlessWorkEventDto,
     targetStatus: string,
   ): Promise<void> {
+    const { data: current, error: selectError } = await this.supabase
+      .getClient()
+      .from('agreements')
+      .select('status, id')
+      .eq('contract_id', payload.contractId)
+      .maybeSingle();
+    if (selectError) {
+      this.logger.error(
+        `Validation SELECT failed for contractId="${payload.contractId}": ${selectError.message}`,
+      );
+      throw new Error(selectError.message);
+    }
+    if (current) {
+      const transitionValidation = validateTransition(current.status as string, targetStatus);
+      if (!transitionValidation.success) {
+        this.logger.warn(
+          `Invalid transition from TW webhook: "${current.status}" → "${targetStatus}" for ` +
+            `contractId="${payload.contractId}" — skipping. ${JSON.stringify(transitionValidation.error)}`,
+        );
+        await this.activity.logActivity(
+          current.id,
+          'trustless-work-webhook',
+          'webhook_transition_rejected',
+          {
+            event: payload.event,
+            contractId: payload.contractId,
+            from: current.status,
+            to: targetStatus,
+            reason: transitionValidation.error,
+          },
+        );
+        return;
+      }
+    }
+
     const updates: Record<string, unknown> = {
       status: targetStatus,
       updated_at: new Date().toISOString(),
@@ -172,7 +211,7 @@ export class WebhooksService {
 
     const row = updated;
 
-    await this.logActivity(
+    await this.activity.logActivity(
       row.id,
       'trustless-work-webhook',
       `webhook_status_changed_to_${targetStatus}`,
@@ -237,11 +276,16 @@ export class WebhooksService {
       throw updateError;
     }
 
-    await this.logActivity(agreement.id, 'trustless-work-webhook', 'webhook_milestone_updated', {
-      event: payload.event,
-      contractId: payload.contractId,
-      milestone_index: milestoneIndex,
-    });
+    await this.activity.logActivity(
+      agreement.id,
+      'trustless-work-webhook',
+      'webhook_milestone_updated',
+      {
+        event: payload.event,
+        contractId: payload.contractId,
+        milestone_index: milestoneIndex,
+      },
+    );
   }
 
   private async applyInfoUpdate(payload: TrustlessWorkEventDto): Promise<void> {
@@ -257,7 +301,7 @@ export class WebhooksService {
       return;
     }
 
-    await this.logActivity(
+    await this.activity.logActivity(
       agreement.id,
       'trustless-work-webhook',
       `webhook_event_${payload.event.replace('.', '_')}`,
@@ -300,24 +344,6 @@ export class WebhooksService {
       }
     } catch (err) {
       this.logger.error('Notification dispatch error', err);
-    }
-  }
-
-  private async logActivity(
-    agreementId: string,
-    actorWallet: string,
-    action: string,
-    details: Record<string, unknown> = {},
-  ) {
-    try {
-      await this.supabase.getClient().from('agreement_activity').insert({
-        agreement_id: agreementId,
-        actor_wallet: actorWallet,
-        action,
-        details,
-      });
-    } catch (e) {
-      this.logger.error('logActivity', e);
     }
   }
 }

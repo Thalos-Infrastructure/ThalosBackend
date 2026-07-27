@@ -17,6 +17,8 @@ import { WalletsModule } from './wallets/wallets.module';
 import { EventsModule } from './events/events.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { KycModule } from './kyc/kyc.module';
+import { RetryQueueModule } from './retry-queue/retry-queue.module';
+import { VerificationModule } from './verification/verification.module';
 import { KybModule } from './kyb/kyb.module';
 
 @Module({
@@ -26,6 +28,7 @@ import { KybModule } from './kyb/kyb.module';
     CommonModule,
     SupabaseModule,
     AuthModule,
+    RetryQueueModule,
     InternalTrustlessModule,
     AgreementsModule,
     UsersModule,
@@ -38,6 +41,7 @@ import { KybModule } from './kyb/kyb.module';
     EventsModule,
     WebhooksModule,
     KycModule,
+    VerificationModule,
     KybModule,
   ],
   controllers: [RootController],

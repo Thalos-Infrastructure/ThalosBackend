@@ -1,7 +1,13 @@
 import { ConfigService } from '@nestjs/config';
 import { NotificationsService } from './notifications.service';
 import { SupabaseService } from '../supabase/supabase.service';
-import { AgreementCreatedData, MilestoneApprovedData } from './types/notification-data.types';
+import {
+  AgreementCreatedData,
+  DisputeOpenedData,
+  DisputeResolvedData,
+  EvidenceSubmittedData,
+  MilestoneApprovedData,
+} from './types/notification-data.types';
 
 /**
  * Build a deeply chainable Supabase query stub that resolves with the given
@@ -232,5 +238,92 @@ describe('NotificationsService — EMAIL_FROM / EMAIL_REPLY_TO env wiring', () =
     await service.notifyAgreementCreated(agreementCreatedData);
 
     expect(resend.calls).toHaveLength(0);
+  });
+});
+
+const evidenceSubmittedData: EvidenceSubmittedData = {
+  agreementId: baseAgreementId,
+  agreementTitle: 'Logo design',
+  milestoneIndex: 0,
+  milestoneDescription: 'Brand kit',
+  milestoneAmount: '75',
+  asset: 'USDC',
+  submittedByWallet: 'GWALLET-PAYEE',
+  submittedByName: 'Bob',
+  evidenceDescription: 'Figma export attached',
+  evidenceUrls: ['https://example.com/proof'],
+};
+
+const disputeOpenedData: DisputeOpenedData = {
+  agreementId: baseAgreementId,
+  agreementTitle: 'Logo design',
+  disputeReason: 'Deliverable does not match scope',
+  openedByWallet: 'GWALLET-CREATOR',
+  openedByName: 'Alice',
+};
+
+const disputeResolvedData: DisputeResolvedData = {
+  agreementId: baseAgreementId,
+  agreementTitle: 'Logo design',
+  resolution: 'Split 40/60',
+  resolvedByWallet: 'GWALLET-RESOLVER',
+  refundAmount: '60.00',
+  releaseAmount: '90.00',
+  asset: 'USDC',
+};
+
+describe('NotificationsService — lifecycle email subjects and templates', () => {
+  it('sends evidence submitted email with subject and template content', async () => {
+    const { service, resendMock } = buildService({});
+
+    await service.notifyEvidenceSubmitted(evidenceSubmittedData);
+
+    expect(resendMock.calls).toHaveLength(1);
+    const call = resendMock.calls[0];
+    expect(call.subject).toBe('Evidence Submitted: Logo design');
+    expect(call.html).toContain('Evidence Submitted');
+    expect(call.html).toContain('Logo design');
+    expect(call.html).toContain('Brand kit');
+    expect(call.html).toContain('Figma export attached');
+  });
+
+  it('sends milestone approved email with subject and template content', async () => {
+    const { service, resendMock } = buildService({});
+
+    await service.notifyMilestoneApproved(milestoneApprovedData);
+
+    expect(resendMock.calls).toHaveLength(1);
+    const call = resendMock.calls[0];
+    expect(call.subject).toBe('Milestone Approved: Brand kit');
+    expect(call.html).toContain('Milestone Approved');
+    expect(call.html).toContain('Brand kit');
+    expect(call.html).toContain('Logo design');
+  });
+
+  it('sends dispute opened email with subject and template content', async () => {
+    const { service, resendMock } = buildService({});
+
+    await service.notifyDisputeOpened(disputeOpenedData);
+
+    expect(resendMock.calls).toHaveLength(1);
+    const call = resendMock.calls[0];
+    expect(call.subject).toBe('Dispute Opened: Logo design');
+    expect(call.html).toContain('Dispute Opened');
+    expect(call.html).toContain('Deliverable does not match scope');
+    expect(call.html).toContain('Logo design');
+  });
+
+  it('sends dispute resolved email with subject and template content', async () => {
+    const { service, resendMock } = buildService({});
+
+    await service.notifyDisputeResolved(disputeResolvedData);
+
+    expect(resendMock.calls).toHaveLength(1);
+    const call = resendMock.calls[0];
+    expect(call.subject).toBe('Dispute Resolved: Logo design');
+    expect(call.html).toContain('Dispute Resolved');
+    expect(call.html).toContain('Split 40/60');
+    expect(call.html).toContain('60.00');
+    expect(call.html).toContain('90.00');
   });
 });

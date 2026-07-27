@@ -11,17 +11,20 @@ import { LinkContractDto } from './dto/link-contract.dto';
 import { UpdateAgreementStatusDto } from './dto/update-status.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
 import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
+import { milestonesSatisfyCompletion } from './agreement-lifecycle';
 import {
-  canTransition,
-  invalidTransitionMessage,
-  milestonesSatisfyCompletion,
-} from './agreement-lifecycle';
+  validateAgreement,
+  validateTransition,
+  validateAgreementConsistency,
+} from './agreement.validator';
+import { AgreementActivityService } from './agreement-activity.service';
 
 @Injectable()
 export class AgreementsService {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly activity: AgreementActivityService,
   ) {}
 
   private async walletForUserId(userId: string): Promise<string | null> {
@@ -89,6 +92,11 @@ export class AgreementsService {
   }
 
   async create(userId: string, dto: CreateAgreementDto) {
+    const validation = validateAgreement(dto);
+    if (!validation.success) {
+      return { agreement: null, error: validation.error };
+    }
+
     await this.assertActorWallet(userId, dto.created_by);
 
     const createdByProfileId = await this.profileIdByWallet(dto.created_by);
@@ -139,13 +147,34 @@ export class AgreementsService {
       .insert(participants);
 
     if (participantsError) {
-      console.error('agreement_participants insert:', participantsError);
+      await this.supabase.getClient().from('agreements').delete().eq('id', agreement.id);
+      throw new BadRequestException(
+        `Failed to create agreement participants: ${participantsError.message}`,
+      );
     }
 
-    await this.logActivity(agreement.id, dto.created_by, 'created', {
+    await this.activity.logActivity(agreement.id, dto.created_by, 'created', {
       title: dto.title,
       amount: dto.amount,
     });
+
+    const createdMilestones = (agreement.milestones ?? []) as Array<{
+      description?: string;
+      status?: string;
+    }>;
+    for (let index = 0; index < createdMilestones.length; index++) {
+      const milestone = createdMilestones[index];
+      await this.activity.logActivity(
+        agreement.id,
+        dto.created_by,
+        'milestone_created',
+        {
+          milestone_index: index,
+          milestone_description: milestone.description,
+        },
+        { previousState: null, newState: milestone.status ?? 'pending' },
+      );
+    }
 
     this.eventEmitter.emit(AGREEMENT_EVENTS.CREATED, {
       agreementId: agreement.id,
@@ -175,7 +204,7 @@ export class AgreementsService {
 
     if (error) return { success: false, error: error.message };
 
-    await this.logActivity(agreementId, dto.actor_wallet, 'contract_linked', {
+    await this.activity.logActivity(agreementId, dto.actor_wallet, 'contract_linked', {
       contract_id: dto.contract_id,
     });
     return { success: true, error: null };
@@ -198,14 +227,26 @@ export class AgreementsService {
 
     const fromStatus = current.status as string;
 
-    if (!canTransition(fromStatus, dto.status)) {
-      throw new BadRequestException(invalidTransitionMessage(fromStatus, dto.status));
+    const transitionValidation = validateTransition(fromStatus, dto.status);
+    if (!transitionValidation.success) {
+      throw new BadRequestException({ success: false, error: transitionValidation.error });
     }
 
     if (dto.status === 'completed' && !milestonesSatisfyCompletion(current.milestones)) {
-      throw new BadRequestException(
-        'All milestones must be approved or released before the agreement can be completed',
-      );
+      throw new BadRequestException({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          details: [
+            {
+              field: 'status',
+              code: 'INVALID_TRANSITION',
+              message:
+                'All milestones must be approved or released before the agreement can be completed',
+            },
+          ],
+        },
+      });
     }
 
     const updates: Record<string, unknown> = {
@@ -226,11 +267,17 @@ export class AgreementsService {
 
     if (error) return { success: false, error: error.message };
 
-    await this.logActivity(agreementId, dto.actor_wallet, `status_changed_to_${dto.status}`, {
-      status: dto.status,
-      from: fromStatus,
-      to: dto.status,
-    });
+    await this.activity.logActivity(
+      agreementId,
+      dto.actor_wallet,
+      `status_changed_to_${dto.status}`,
+      {
+        status: dto.status,
+        from: fromStatus,
+        to: dto.status,
+      },
+      { previousState: fromStatus, newState: dto.status },
+    );
 
     if (dto.status === 'funded') {
       this.eventEmitter.emit(AGREEMENT_EVENTS.FUNDED, {
@@ -260,7 +307,7 @@ export class AgreementsService {
     const { data: agreement, error: fetchError } = await this.supabase
       .getClient()
       .from('agreements')
-      .select('milestones')
+      .select('id, title, amount, asset, milestones, agreement_type')
       .eq('id', agreementId)
       .single();
 
@@ -281,6 +328,7 @@ export class AgreementsService {
     }
 
     const milestone = milestones[dto.milestone_index];
+    const previousMilestoneStatus = milestone.status;
     const emitsEvidence = dto.evidence_description !== undefined || dto.evidence_urls !== undefined;
 
     milestone.status = dto.status;
@@ -295,6 +343,14 @@ export class AgreementsService {
       milestone.evidence_submitted_at = new Date().toISOString();
     }
 
+    const consistency = validateAgreementConsistency({
+      amount: agreement.amount,
+      milestones,
+    });
+    if (!consistency.success) {
+      throw new BadRequestException({ success: false, error: consistency.error });
+    }
+
     const { error: updateError } = await this.supabase
       .getClient()
       .from('agreements')
@@ -306,10 +362,52 @@ export class AgreementsService {
 
     if (updateError) return { success: false, error: updateError.message };
 
-    await this.logActivity(agreementId, dto.actor_wallet, `milestone_${dto.status}`, {
-      milestone_index: dto.milestone_index,
-      milestone_description: milestones[dto.milestone_index].description,
-    });
+    await this.activity.logActivity(
+      agreementId,
+      dto.actor_wallet,
+      `milestone_${dto.status}`,
+      {
+        milestone_index: dto.milestone_index,
+        milestone_description: milestone.description,
+        from: previousMilestoneStatus,
+        to: dto.status,
+        milestone_amount: milestone.amount,
+        asset: (agreement.asset as string) ?? 'USDC',
+        evidence_description: dto.evidence_description,
+        evidence_urls: dto.evidence_urls,
+      },
+      { previousState: previousMilestoneStatus, newState: dto.status },
+    );
+
+    const agreementTitle = (agreement.title as string) ?? agreementId;
+    const asset = (agreement.asset as string) ?? 'USDC';
+
+    if (emitsEvidence) {
+      this.eventEmitter.emit(AGREEMENT_EVENTS.EVIDENCE_SUBMITTED, {
+        agreementId: agreement.id as string,
+        agreementTitle,
+        milestoneIndex: dto.milestone_index,
+        milestoneDescription: milestone.description,
+        milestoneAmount: milestone.amount,
+        asset,
+        submittedByWallet: dto.actor_wallet,
+        evidenceDescription: dto.evidence_description,
+        evidenceUrls: dto.evidence_urls,
+      });
+    }
+
+    if (previousMilestoneStatus !== 'approved' && dto.status === 'approved') {
+      this.eventEmitter.emit(AGREEMENT_EVENTS.MILESTONE_APPROVED, {
+        agreementId: agreement.id as string,
+        agreementTitle,
+        milestoneIndex: dto.milestone_index,
+        milestoneDescription: milestone.description,
+        milestoneAmount: milestone.amount,
+        asset,
+        approvedByWallet: dto.actor_wallet,
+      });
+    }
+
     return { success: true, error: null };
   }
 
@@ -416,6 +514,96 @@ export class AgreementsService {
     return { agreement: data, error: null };
   }
 
+  /**
+   * Shared side-effect path for Agreement status changes.
+   * Used by DisputesService (and any other internal caller) so dispute-driven
+   * updates emit the same activity log shape and domain events as updateStatus.
+   */
+  async applyStatusChange(
+    agreementId: string,
+    actorWallet: string,
+    toStatus: string,
+    options: {
+      fromStatus?: string;
+      enforceTransition?: boolean;
+      activityDetails?: Record<string, unknown>;
+    } = {},
+  ): Promise<{ success: boolean; error: string | null; fromStatus?: string }> {
+    const { data: current, error: fetchError } = await this.supabase
+      .getClient()
+      .from('agreements')
+      .select('status, title, amount, asset')
+      .eq('id', agreementId)
+      .single();
+
+    if (fetchError || !current) {
+      return { success: false, error: fetchError?.message || 'Agreement not found' };
+    }
+
+    const fromStatus = options.fromStatus ?? (current.status as string);
+
+    if (options.enforceTransition) {
+      const transitionValidation = validateTransition(fromStatus, toStatus);
+      if (!transitionValidation.success) {
+        return {
+          success: false,
+          error: transitionValidation.error?.details[0]?.message ?? 'Invalid transition',
+        };
+      }
+    }
+
+    const updates: Record<string, unknown> = {
+      status: toStatus,
+      updated_at: new Date().toISOString(),
+    };
+    if (toStatus === 'funded') {
+      updates.funded_at = new Date().toISOString();
+    } else if (toStatus === 'completed' || toStatus === 'resolved') {
+      updates.completed_at = new Date().toISOString();
+    }
+
+    const { error } = await this.supabase
+      .getClient()
+      .from('agreements')
+      .update(updates)
+      .eq('id', agreementId);
+
+    if (error) return { success: false, error: error.message };
+
+    await this.activity.logActivity(
+      agreementId,
+      actorWallet,
+      `status_changed_to_${toStatus}`,
+      {
+        status: toStatus,
+        from: fromStatus,
+        to: toStatus,
+        ...(options.activityDetails ?? {}),
+      },
+      { previousState: fromStatus, newState: toStatus },
+    );
+
+    if (toStatus === 'funded') {
+      this.eventEmitter.emit(AGREEMENT_EVENTS.FUNDED, {
+        agreementId,
+        title: current.title,
+        amount: current.amount,
+        asset: current.asset ?? 'USDC',
+        fundedByWallet: actorWallet,
+      });
+    } else if (toStatus === 'completed' || toStatus === 'resolved') {
+      this.eventEmitter.emit(AGREEMENT_EVENTS.COMPLETED, {
+        agreementId,
+        title: current.title,
+        totalAmount: current.amount,
+        asset: current.asset ?? 'USDC',
+        completedAt: new Date().toISOString(),
+      });
+    }
+
+    return { success: true, error: null, fromStatus };
+  }
+
   async getActivity(userId: string, agreementId: string) {
     await this.assertCanAccessAgreement(userId, agreementId);
 
@@ -428,23 +616,5 @@ export class AgreementsService {
 
     if (error) return { activities: [], error: error.message };
     return { activities: data ?? [], error: null };
-  }
-
-  private async logActivity(
-    agreementId: string,
-    actorWallet: string,
-    action: string,
-    details: Record<string, unknown> = {},
-  ) {
-    try {
-      await this.supabase.getClient().from('agreement_activity').insert({
-        agreement_id: agreementId,
-        actor_wallet: actorWallet,
-        action,
-        details,
-      });
-    } catch (e) {
-      console.error('logAgreementActivity', e);
-    }
   }
 }

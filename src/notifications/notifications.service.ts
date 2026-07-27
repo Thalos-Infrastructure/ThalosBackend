@@ -1,8 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { OnEvent } from '@nestjs/event-emitter';
 import { Resend } from 'resend';
-import { AgreementEventName } from '../events/agreement-events';
 import { SupabaseService } from '../supabase/supabase.service';
 import {
   AgreementCreatedData,
@@ -22,11 +20,9 @@ import {
   disputeResolvedTemplate,
   agreementCompletedTemplate,
 } from './templates';
-import {
-  DISPUTE_OPENED,
-  DISPUTE_RESOLVED,
-  type DisputeOpenedEventPayload,
-  type DisputeResolvedEventPayload,
+import type {
+  DisputeOpenedEventPayload,
+  DisputeResolvedEventPayload,
 } from '../common/constants/notification-events';
 
 /**
@@ -169,24 +165,6 @@ export class NotificationsService implements OnModuleInit {
     }
   }
 
-  @OnEvent(AgreementEventName.EvidenceSubmitted)
-  async handleEvidenceSubmitted(data: EvidenceSubmittedData): Promise<void> {
-    try {
-      await this.notifyEvidenceSubmitted(data, data.submittedByWallet);
-    } catch (error) {
-      this.logger.error('Failed to handle evidence submitted event', error);
-    }
-  }
-
-  @OnEvent(AgreementEventName.MilestoneApproved)
-  async handleMilestoneApproved(data: MilestoneApprovedData): Promise<void> {
-    try {
-      await this.notifyMilestoneApproved(data);
-    } catch (error) {
-      this.logger.error('Failed to handle milestone approved event', error);
-    }
-  }
-
   /**
    * Notify when a new agreement is created
    */
@@ -281,7 +259,10 @@ export class NotificationsService implements OnModuleInit {
     await this.sendEmail(emails, subject, html);
   }
 
-  @OnEvent(DISPUTE_OPENED)
+  /**
+   * Enrich a raw dispute-opened domain event and send the notification email.
+   * Invoked by NotificationsListener (no @OnEvent here — avoids double-fire).
+   */
   async handleDisputeOpened(payload: DisputeOpenedEventPayload): Promise<void> {
     const { data: agreement } = await this.supabase
       .getClient()
@@ -311,7 +292,10 @@ export class NotificationsService implements OnModuleInit {
     });
   }
 
-  @OnEvent(DISPUTE_RESOLVED)
+  /**
+   * Enrich a raw dispute-resolved domain event and send the notification email.
+   * Invoked by NotificationsListener (no @OnEvent here — avoids double-fire).
+   */
   async handleDisputeResolved(payload: DisputeResolvedEventPayload): Promise<void> {
     const { data: agreement } = await this.supabase
       .getClient()

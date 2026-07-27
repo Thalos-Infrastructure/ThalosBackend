@@ -6,8 +6,8 @@ export class UpdateMilestoneDto {
   milestone_index: number;
 
   @IsString()
-  @IsIn(['pending', 'approved', 'released'])
-  status: 'pending' | 'approved' | 'released';
+  @IsIn(['pending', 'approved', 'released', 'rejected'])
+  status: 'pending' | 'approved' | 'released' | 'rejected';
 
   @IsString()
   actor_wallet: string;

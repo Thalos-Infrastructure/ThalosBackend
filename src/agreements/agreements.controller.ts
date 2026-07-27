@@ -31,7 +31,16 @@ export class AgreementsController {
   async create(@CurrentUser() user: AuthUserCtx, @Body() dto: CreateAgreementDto) {
     const result = await this.agreements.create(user.userId, dto);
     if (result.error) {
-      throw new BadRequestException(result.error);
+      if (typeof result.error === 'object' && 'code' in result.error) {
+        throw new BadRequestException({ success: false, error: result.error });
+      }
+      throw new BadRequestException({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          details: [{ field: 'body', code: 'VALIDATION_ERROR', message: result.error }],
+        },
+      });
     }
     return result;
   }

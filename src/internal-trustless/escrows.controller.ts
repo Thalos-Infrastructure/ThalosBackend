@@ -4,15 +4,20 @@ import {
   Controller,
   Get,
   HttpCode,
+  OnModuleInit,
   Param,
   Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { formatUpstreamError } from './escrow-write.helper';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RetryQueueService } from '../retry-queue/retry-queue.service';
+import { RetryJobType } from '../retry-queue/retry-queue.types';
 import { relayToTrustless } from './trustless-relay.helper';
 import * as escrowWrite from './escrow-write.helper';
+import { RelayRequest, TrustlessRelayError } from './escrow-write.helper';
 import {
   ApproveMilestoneDto,
   ChangeMilestoneStatusDto,
@@ -27,12 +32,45 @@ import {
 @ApiBearerAuth('bearer')
 @Controller('escrows')
 @UseGuards(JwtAuthGuard)
-export class EscrowsController {
+export class EscrowsController implements OnModuleInit {
   // NOTE: write endpoints require a valid JWT (class-level JwtAuthGuard) but do NOT
   // bind the JWT user to `signer`. Authorization of the actual signer is enforced by
   // the on-chain signature: build endpoints only return an UNSIGNED XDR, and the
   // transaction is only effective once signed by the signer's wallet (validated
   // on-chain when submitted via /escrows/send-transaction).
+  constructor(private readonly retryQueue: RetryQueueService) {}
+
+  onModuleInit(): void {
+    // One generic handler per bucket: it just replays the same {path, body} against
+    // Trustless Work, so create/fund/approve/change-status/release can share it.
+    const replay = (payload: RelayRequest) => escrowWrite.relayWrite(payload.path, payload.body);
+    this.retryQueue.registerHandler<RelayRequest>(RetryJobType.AGREEMENT_CREATION, replay);
+    this.retryQueue.registerHandler<RelayRequest>(RetryJobType.MILESTONE_UPDATE, replay);
+    this.retryQueue.registerHandler<RelayRequest>(RetryJobType.PAYMENT_EXECUTION, replay);
+  }
+
+  /**
+   * Runs a Trustless Work write inline (unchanged happy path — the caller still gets the
+   * result, e.g. the unsigned XDR, synchronously). On a transient failure (TW 5xx or a
+   * network-level error) it also enqueues a backstop job on the shared retry queue so the
+   * operation isn't silently dropped, then re-throws the original error to the client.
+   * Validation errors (4xx) are re-thrown as-is — retrying those can't help.
+   */
+  private async writeWithBackstop(
+    jobType: RetryJobType,
+    idempotencyKey: string,
+    request: RelayRequest,
+  ): Promise<unknown> {
+    try {
+      return await escrowWrite.relayWrite(request.path, request.body);
+    } catch (error) {
+      if (error instanceof TrustlessRelayError && error.upstreamStatus < 500) {
+        throw error;
+      }
+      await this.retryQueue.enqueue<RelayRequest>(jobType, request, idempotencyKey);
+      throw error;
+    }
+  }
 
   @Get('by-signer/:address')
   async getEscrowsBySigner(
@@ -51,7 +89,7 @@ export class EscrowsController {
       pageSize: pageSize ?? 5,
       validateOnChain: validateOnChain ?? true,
     });
-    if (result.status >= 400) throw new BadRequestException(result.data);
+    if (result.status >= 400) throw new BadRequestException(formatUpstreamError(result.data));
     return result.data;
   }
 
@@ -78,7 +116,7 @@ export class EscrowsController {
     if (status) query.status = status;
     if (type) query.type = type;
     const result = await relayToTrustless('GET', 'helper/get-escrows-by-role', query);
-    if (result.status >= 400) throw new BadRequestException(result.data);
+    if (result.status >= 400) throw new BadRequestException(formatUpstreamError(result.data));
     return result.data;
   }
 
@@ -90,7 +128,13 @@ export class EscrowsController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Crear escrow (devuelve XDR sin firmar)' })
   async createEscrow(@Body() dto: CreateEscrowDto) {
-    return escrowWrite.createEscrow(dto);
+    const request = escrowWrite.buildCreateEscrowRequest(dto);
+    const engagementId = (request.body as { engagementId: string }).engagementId;
+    return this.writeWithBackstop(
+      RetryJobType.AGREEMENT_CREATION,
+      `agreement_creation:${engagementId}`,
+      request,
+    );
   }
 
   /**
@@ -101,7 +145,11 @@ export class EscrowsController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Fondear escrow (devuelve XDR sin firmar)' })
   async fundEscrow(@Body() dto: FundEscrowDto) {
-    return escrowWrite.fundEscrow(dto);
+    return this.writeWithBackstop(
+      RetryJobType.PAYMENT_EXECUTION,
+      `payment_execution:fund:${dto.contractId}:${dto.signer}:${dto.amount}`,
+      escrowWrite.buildFundEscrowRequest(dto),
+    );
   }
 
   /**
@@ -112,7 +160,11 @@ export class EscrowsController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Aprobar milestone (devuelve XDR sin firmar)' })
   async approveMilestone(@Body() dto: ApproveMilestoneDto) {
-    return escrowWrite.approveMilestone(dto);
+    return this.writeWithBackstop(
+      RetryJobType.MILESTONE_UPDATE,
+      `milestone_update:approve:${dto.contractId}:${dto.milestoneIndex}`,
+      escrowWrite.buildApproveMilestoneRequest(dto),
+    );
   }
 
   /**
@@ -123,7 +175,11 @@ export class EscrowsController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Cambiar estado de milestone (devuelve XDR sin firmar)' })
   async changeMilestoneStatus(@Body() dto: ChangeMilestoneStatusDto) {
-    return escrowWrite.changeMilestoneStatus(dto);
+    return this.writeWithBackstop(
+      RetryJobType.MILESTONE_UPDATE,
+      `milestone_update:status:${dto.contractId}:${dto.milestoneIndex}:${dto.newStatus}`,
+      escrowWrite.buildChangeMilestoneStatusRequest(dto),
+    );
   }
 
   /**
@@ -134,7 +190,11 @@ export class EscrowsController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Liberar fondos (devuelve XDR sin firmar)' })
   async releaseFunds(@Body() dto: ReleaseFundsDto) {
-    return escrowWrite.releaseFunds(dto);
+    return this.writeWithBackstop(
+      RetryJobType.PAYMENT_EXECUTION,
+      `payment_execution:release:${dto.contractId}:${dto.releaseSigner}:${dto.milestoneIndex ?? 'all'}`,
+      escrowWrite.buildReleaseFundsRequest(dto),
+    );
   }
 
   /**
