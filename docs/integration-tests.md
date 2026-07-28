@@ -70,6 +70,41 @@ This suite should stay green before merging compliance-related changes. Adding a
 `IdentityProvider` implementation only requires a new `MockIdentityProvider({ name, ... })` binding
 in the existing cases — no rewrite of the HTTP assertions.
 
+## Regression Test Suite (issue #69)
+
+Dedicated regression specs guard previously fixed production bugs so they cannot silently
+reappear. Naming: `*.regression.spec.ts`, colocated under `src/<feature>/`. Each `describe`/`it`
+(or a header comment) must cite the originating issue and/or PR.
+
+**Policy:** a bug-fix PR is not done until a matching regression test exists. See
+[CONTRIBUTING.md](../CONTRIBUTING.md).
+
+### Convention
+
+| Rule | Detail |
+| --- | --- |
+| File name | `src/<feature>/<topic>.regression.spec.ts` |
+| Traceability | Issue/PR in title or header comment |
+| Independence | No shared mutable state; mock Supabase / Trustless Work |
+| CI | Included automatically by Jest `testRegex: .*\.spec\.ts$` |
+
+Run only regression specs:
+
+```bash
+pnpm exec jest regression --runInBand
+```
+
+### Index (test → issue/PR)
+
+| Regression file | Guards | Issue / PR |
+| --- | --- | --- |
+| `src/webhooks/webhook-status-mapping.regression.spec.ts` | `escrow.released` → `completed` (not stuck `funded`) | #52 / PR #54 |
+| `src/disputes/dispute-percentages.regression.spec.ts` | Dispute resolve percentages must sum to 100 | #12 / PR #49 |
+| `src/wallets/stellar-address.regression.spec.ts` | Invalid Stellar address rejected | #27 |
+| `src/agreements/status-transitions.regression.spec.ts` | Illegal status transitions blocked | #59 / #67 · PR #110 / #76 |
+| `src/agreements/agreement-activity.regression.spec.ts` | Dispute/status events land in `agreement_activity` with states | #58 / #61 · PR #100 / #104 |
+| `src/integration/api-edge-cases.regression.spec.ts` | Invalid JWT, not-found IDs, unauthorized `by-wallet` | #15 / #51 · PR #57 |
+
 ## Running Locally
 
 Install dependencies:
@@ -90,6 +125,12 @@ Run only the migrated flow integration suite:
 pnpm run test:integration
 ```
 
+Run only regression specs:
+
+```bash
+pnpm exec jest regression --runInBand
+```
+
 ## CI
 
 `.github/workflows/ci.yml` installs with `pnpm install --frozen-lockfile`, checks formatting and
@@ -98,3 +139,5 @@ linting, then runs:
 ```bash
 pnpm exec jest --runInBand
 ```
+
+Regression specs are included in that Jest run (no separate CI job).
