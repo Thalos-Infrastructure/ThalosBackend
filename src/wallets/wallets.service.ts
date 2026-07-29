@@ -29,6 +29,10 @@ export interface UserWallet {
   verified_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Login method that produced this wallet ('accesly', 'pollar', …). #108/#109 */
+  auth_provider?: string | null;
+  /** Soroban Smart Account address (C…); wallet_address holds the G-address. */
+  c_address?: string | null;
 }
 
 export interface WalletWithBalance extends UserWallet {
@@ -247,20 +251,41 @@ export class WalletsService {
       verifiedAt = new Date().toISOString();
     }
 
-    const { data, error } = await this.supabase
+    const baseRow = {
+      user_id: userId,
+      wallet_address: dto.wallet_address,
+      wallet_type: dto.wallet_type,
+      label: dto.label || null,
+      is_primary: isPrimary,
+      is_verified: isVerified,
+      verified_at: verifiedAt,
+    };
+
+    // Accesly (#109) / Pollar (#108) identity: login method + Smart Account
+    // C-address. wallet_address keeps the derived G-address, which is what
+    // Trustless Work role matching (by-signer / by-role) keys on.
+    const identityRow = {
+      ...baseRow,
+      ...(dto.auth_provider ? { auth_provider: dto.auth_provider } : {}),
+      ...(dto.c_address ? { c_address: dto.c_address } : {}),
+    };
+
+    let { data, error } = await this.supabase
       .getClient()
       .from('user_wallets')
-      .insert({
-        user_id: userId,
-        wallet_address: dto.wallet_address,
-        wallet_type: dto.wallet_type,
-        label: dto.label || null,
-        is_primary: isPrimary,
-        is_verified: isVerified,
-        verified_at: verifiedAt,
-      })
+      .insert(identityRow)
       .select()
       .single();
+
+    // Fall back to the base row while migration 008 hasn't been applied.
+    if (error && error.code === 'PGRST204') {
+      ({ data, error } = await this.supabase
+        .getClient()
+        .from('user_wallets')
+        .insert(baseRow)
+        .select()
+        .single());
+    }
 
     if (error) {
       if (error.code === '23505') {
