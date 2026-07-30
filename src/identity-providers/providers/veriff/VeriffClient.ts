@@ -1,5 +1,3 @@
-import axios from 'axios';
-
 export interface VeriffConfig {
   apiKey: string;
   apiSecret: string;
@@ -18,13 +16,15 @@ export class VeriffClient {
 
   private async request(method: string, path: string, data?: unknown): Promise<unknown> {
     const auth = Buffer.from(`${this.config.apiKey}:${this.config.apiSecret}`).toString('base64');
-    try {
-      const res = await axios.request({ method, url: `${this.baseUrl}${path}`, headers: { 'Content-Type': 'application/json', Authorization: `Basic ${auth}` }, data, timeout: this.config.timeout || 30000 });
-      return res.data;
-    } catch (error: any) {
-      if (error.response) throw new Error(`Veriff API error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
-      throw new Error(`Veriff request failed: ${error.message}`);
-    }
+    const opts: RequestInit = {
+      method,
+      headers: { 'Content-Type': 'application/json', Authorization: `Basic ${auth}` },
+      body: data ? JSON.stringify(data) : undefined,
+      signal: AbortSignal.timeout(this.config.timeout || 30000),
+    };
+    const res = await fetch(`${this.baseUrl}${path}`, opts);
+    if (!res.ok) throw new Error(`Veriff API error: ${res.status} - ${await res.text()}`);
+    return await res.json();
   }
 
   async createSession(data: unknown): Promise<unknown> { return await this.request('POST', '/sessions', data); }

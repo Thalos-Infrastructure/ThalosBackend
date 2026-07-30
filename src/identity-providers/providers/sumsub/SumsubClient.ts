@@ -1,4 +1,3 @@
-import axios from 'axios';
 import * as jwt from 'jsonwebtoken';
 
 export interface SumsubConfig {
@@ -29,19 +28,15 @@ export class SumsubClient {
     if (queryParams) {
       for (const key of Object.keys(queryParams)) url.searchParams.append(key, queryParams[key]);
     }
-    try {
-      const response = await axios.request({
-        method,
-        url: url.toString(),
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        data,
-        timeout: this.config.timeout || 30000,
-      });
-      return response.data;
-    } catch (error: any) {
-      if (error.response) throw new Error(`Sumsub API error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
-      throw new Error(`Sumsub request failed: ${error.message}`);
-    }
+    const opts: RequestInit = {
+      method,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: data ? JSON.stringify(data) : undefined,
+      signal: AbortSignal.timeout(this.config.timeout || 30000),
+    };
+    const res = await fetch(url.toString(), opts);
+    if (!res.ok) throw new Error(`Sumsub API error: ${res.status} - ${await res.text()}`);
+    return await res.json();
   }
 
   async createApplicant(userId: string, metadata?: unknown): Promise<unknown> {

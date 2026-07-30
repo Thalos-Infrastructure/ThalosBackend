@@ -1,5 +1,3 @@
-import axios from 'axios';
-
 export interface AlloyConfig {
   apiKey: string;
   apiUrl?: string;
@@ -16,13 +14,15 @@ export class AlloyClient {
   }
 
   private async request(method: string, path: string, data?: unknown): Promise<unknown> {
-    try {
-      const res = await axios.request({ method, url: `${this.baseUrl}${path}`, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.config.apiKey}` }, data, timeout: this.config.timeout || 30000 });
-      return res.data;
-    } catch (error: any) {
-      if (error.response) throw new Error(`Alloy API error: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
-      throw new Error(`Alloy request failed: ${error.message}`);
-    }
+    const opts: RequestInit = {
+      method,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.config.apiKey}` },
+      body: data ? JSON.stringify(data) : undefined,
+      signal: AbortSignal.timeout(this.config.timeout || 30000),
+    };
+    const res = await fetch(`${this.baseUrl}${path}`, opts);
+    if (!res.ok) throw new Error(`Alloy API error: ${res.status} - ${await res.text()}`);
+    return await res.json();
   }
 
   async createEvaluation(data: unknown): Promise<unknown> { return await this.request('POST', '/evaluations', data); }
