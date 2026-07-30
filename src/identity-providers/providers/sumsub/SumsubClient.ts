@@ -2,7 +2,7 @@ import * as jwt from 'jsonwebtoken';
 
 export interface SumsubConfig {
   apiKey: string;
-  apiSecret: string;
+  apiSecret?: string;
   baseUrl?: string;
   timeout?: number;
 }
@@ -19,6 +19,7 @@ export class SumsubClient {
   private createJwt(): string {
     const iat = Math.floor(Date.now() / 1000);
     const exp = iat + 3600;
+    if (!this.config.apiSecret) throw new Error('Sumsub apiSecret is required');
     return jwt.sign({ iat, exp }, this.config.apiSecret, { algorithm: 'HS256' });
   }
 
@@ -40,7 +41,7 @@ export class SumsubClient {
   }
 
   async createApplicant(userId: string, metadata?: unknown): Promise<unknown> {
-    return await this.request('POST', '/resources/applicants', { externalUserId: userId, ...(metadata as object) ?? {} });
+    return await this.request('POST', '/resources/applicants', { externalUserId: userId, ...(metadata as Record<string, unknown>) ?? {} });
   }
   async getApplicantStatus(applicantId: string): Promise<unknown> {
     return await this.request('GET', `/resources/applicants/${applicantId}/status`);

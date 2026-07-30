@@ -1,6 +1,6 @@
 export interface VeriffConfig {
   apiKey: string;
-  apiSecret: string;
+  apiSecret?: string;
   baseUrl?: string;
   timeout?: number;
 }
@@ -15,6 +15,7 @@ export class VeriffClient {
   }
 
   private async request(method: string, path: string, data?: unknown): Promise<unknown> {
+    if (!this.config.apiSecret) throw new Error('Veriff apiSecret is required');
     const auth = Buffer.from(`${this.config.apiKey}:${this.config.apiSecret}`).toString('base64');
     const opts: RequestInit = {
       method,
