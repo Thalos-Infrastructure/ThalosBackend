@@ -75,24 +75,23 @@ class QueryBuilder implements PromiseLike<{ data?: unknown; error: unknown }> {
 
   then<TResult1 = { data?: unknown; error: unknown }, TResult2 = never>(
     onfulfilled?:
-      | ((value: { data?: unknown; error: unknown }) => TResult1 | PromiseLike<TResult1>)
-      | null,
+      ((value: { data?: unknown; error: unknown }) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ) {
     return this.execute().then(onfulfilled, onrejected);
   }
 
-  private async execute() {
+  private execute(): Promise<{ data?: unknown; error: unknown }> {
     const rows = this.db.tables[this.table] ?? [];
     if (this.mode === 'insert') {
       const inserted = { id: `${this.table}-${rows.length + 1}`, ...this.payload };
       this.db.tables[this.table] = [...rows, inserted];
-      return { data: inserted, error: null };
+      return Promise.resolve({ data: inserted, error: null });
     }
 
     const matched = rows.filter((row) =>
       this.filters.every((f) => {
-        if (Array.isArray(f.value)) return f.value.includes(row[f.key]);
+        if (Array.isArray(f.value)) return (f.value as unknown[]).includes(row[f.key]);
         return row[f.key] === f.value;
       }),
     );
@@ -102,13 +101,18 @@ class QueryBuilder implements PromiseLike<{ data?: unknown; error: unknown }> {
     }
 
     if (this.resultMode === 'single') {
-      if (!matched[0]) return { data: null, error: { message: 'not found', code: 'PGRST116' } };
-      return { data: matched[0], error: null };
+      if (!matched[0]) {
+        return Promise.resolve({
+          data: null,
+          error: { message: 'not found', code: 'PGRST116' },
+        });
+      }
+      return Promise.resolve({ data: matched[0], error: null });
     }
     if (this.resultMode === 'maybeSingle') {
-      return { data: matched[0] ?? null, error: null };
+      return Promise.resolve({ data: matched[0] ?? null, error: null });
     }
-    return { data: matched, error: null };
+    return Promise.resolve({ data: matched, error: null });
   }
 }
 
@@ -210,10 +214,7 @@ describe('regression: API edge cases (issue #15 / #51 · PR #57)', () => {
 
   it('returns 404 for a missing agreement id', async () => {
     const missingId = '550e8400-e29b-41d4-a716-446655440999';
-    await request(app.getHttpServer())
-      .get(`/v1/agreements/${missingId}`)
-      .set(auth())
-      .expect(404);
+    await request(app.getHttpServer()).get(`/v1/agreements/${missingId}`).set(auth()).expect(404);
   });
 
   it('returns 403 for by-wallet when the JWT user does not own the wallet', async () => {

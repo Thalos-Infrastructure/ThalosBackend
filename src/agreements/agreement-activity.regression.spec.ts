@@ -151,7 +151,7 @@ describe('regression: agreement activity logging (issue #58 / #61 · PR #100 / #
 
     expect(result.error).toBeNull();
 
-    const actions = logSpy.mock.calls.map((c) => c[2] as string);
+    const actions = logSpy.mock.calls.map((c) => c[2]);
     expect(actions).toContain('dispute_opened');
     expect(actions).toContain('status_changed_to_disputed');
 
@@ -227,7 +227,7 @@ describe('regression: agreement activity logging (issue #58 / #61 · PR #100 / #
 
     expect(result.error).toBeNull();
 
-    const actions = logSpy.mock.calls.map((c) => c[2] as string);
+    const actions = logSpy.mock.calls.map((c) => c[2]);
     expect(actions).toContain('dispute_resolved');
     expect(actions).toContain('status_changed_to_resolved');
 

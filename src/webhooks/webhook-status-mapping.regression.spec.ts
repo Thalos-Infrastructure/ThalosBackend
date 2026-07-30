@@ -31,8 +31,7 @@ function buildService(getClientCalls: unknown[] = []): MockedWebhooksService {
     { emit },
     { notifyDisputeOpened: jest.fn() },
     {
-      get: (key: string, def?: string) =>
-        key === 'TRUSTLESS_WORK_WEBHOOK_SECRET' ? SECRET : def,
+      get: (key: string, def?: string) => (key === 'TRUSTLESS_WORK_WEBHOOK_SECRET' ? SECRET : def),
     },
     { enqueue, registerHandler },
     { logActivity: jest.fn().mockResolvedValue(undefined) },
@@ -69,8 +68,12 @@ async function runHandleEventAndProcess(
 ): Promise<void> {
   const result = await svc.handleEvent(payload as never);
   expect(result).toEqual({ handled: true });
-  const [, jobPayload] = svc._enqueue.mock.calls[svc._enqueue.mock.calls.length - 1];
-  const [, handler] = svc._registerHandler.mock.calls[0];
+  const enqueueCalls = svc._enqueue.mock.calls as Array<[unknown, unknown]>;
+  const [, jobPayload] = enqueueCalls[enqueueCalls.length - 1];
+  const registerCalls = svc._registerHandler.mock.calls as Array<
+    [unknown, (jobPayload: unknown, attempt: number) => Promise<void>]
+  >;
+  const [, handler] = registerCalls[0];
   await handler(jobPayload, 1);
 }
 
@@ -101,9 +104,7 @@ describe('regression: webhook status mapping (issue #52 / PR #54)', () => {
         completed_at: expect.any(String),
       }),
     );
-    expect(update.update).not.toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'funded' }),
-    );
+    expect(update.update).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'funded' }));
 
     expect(svc._emit).toHaveBeenCalledWith(
       'agreement.completed',

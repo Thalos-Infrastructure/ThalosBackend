@@ -13,7 +13,7 @@ A bug-fix PR is **not done** until a corresponding regression test exists.
 
 | Rule | Detail |
 | --- | --- |
-| Naming | `src/<feature>/<topic>.regression.spec.ts` |
+| Naming | `src/<feature>/*.regression.spec.ts` (e.g. `webhook-status-mapping.regression.spec.ts`) |
 | Discovery | Jest `testRegex` already matches `*.spec.ts`, so regression specs run in `pnpm test` and CI |
 | Run only regressions | `pnpm exec jest regression --runInBand` |
 
