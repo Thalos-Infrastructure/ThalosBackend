@@ -336,7 +336,7 @@ export class AgreementsService {
     const { data: agreement, error: fetchError } = await this.supabase
       .getClient()
       .from('agreements')
-      .select('id, title, amount, asset, milestones, agreement_type')
+      .select('id, title, amount, asset, milestones, agreement_type, contract_id')
       .eq('id', agreementId)
       .single();
 
@@ -410,6 +410,8 @@ export class AgreementsService {
 
     const agreementTitle = (agreement.title as string) ?? agreementId;
     const asset = (agreement.asset as string) ?? 'USDC';
+    const contractId = (agreement.contract_id as string | null) ?? null;
+    const serviceType = (agreement.agreement_type as string | null) ?? null;
 
     if (emitsEvidence) {
       this.eventEmitter.emit(AGREEMENT_EVENTS.EVIDENCE_SUBMITTED, {
@@ -434,6 +436,23 @@ export class AgreementsService {
         milestoneAmount: milestone.amount,
         asset,
         approvedByWallet: dto.actor_wallet,
+        contractId,
+        serviceType,
+      });
+    }
+
+    if (dto.status === 'released') {
+      this.eventEmitter.emit(AGREEMENT_EVENTS.MILESTONE_RELEASED, {
+        agreementId,
+        agreementTitle,
+        milestoneIndex: dto.milestone_index,
+        milestoneDescription: milestone.description,
+        milestoneAmount: milestone.amount,
+        asset,
+        contractId,
+        serviceType,
+        actorWallet: dto.actor_wallet,
+        evidence: dto.evidence_description,
       });
     }
 

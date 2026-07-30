@@ -8,6 +8,7 @@ export const AGREEMENT_EVENTS = {
   COMPLETED: 'agreement.completed',
   EVIDENCE_SUBMITTED: 'evidence.submitted',
   MILESTONE_APPROVED: 'milestone.approved',
+  MILESTONE_RELEASED: 'milestone.released',
   DISPUTE_OPENED: 'dispute.opened',
   DISPUTE_RESOLVED: 'dispute.resolved',
 } as const;

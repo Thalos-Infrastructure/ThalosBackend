@@ -38,6 +38,10 @@ const TW_EVENT_MAP: Record<string, EventConfig> = {
   'escrow.milestone_updated': { action: 'milestone_update' },
   'escrow.dispute_created': { action: 'status_update', targetStatus: 'disputed' },
   'dispute.created': { action: 'status_update', targetStatus: 'disputed' },
+  'milestone.completed': { action: 'milestone_update' },
+  'milestone.approved': { action: 'milestone_update' },
+  'milestone.rejected': { action: 'milestone_update' },
+  'milestone.cancelled': { action: 'milestone_update' },
 };
 
 @Injectable()
