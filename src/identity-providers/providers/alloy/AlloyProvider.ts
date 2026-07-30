@@ -1,68 +1,32 @@
-import { IdentityVerificationProvider } from '../abstraction/IdentityProvider';
-import { IdentityConfigManager } from '../abstraction/IdentityConfigManager';
+import { IdentityVerificationProvider, VerificationSession, VerificationStatus, VerificationResult } from '../../abstraction/IdentityProvider';
+import { IdentityConfigManager } from '../../abstraction/IdentityConfigManager';
 import { AlloyClient } from './AlloyClient';
 
 export class AlloyProvider implements IdentityVerificationProvider {
-  private configManager: IdentityConfigManager;
   private client: AlloyClient;
 
   constructor(config: unknown) {
-    this.configManager = new IdentityConfigManager(config);
-    this.client = new AlloyClient(this.configManager.getConfig());
+    const cm = new IdentityConfigManager(config as Record<string, string>);
+    this.client = new AlloyClient(cm.getConfig());
   }
 
-  getProviderName() {
-    return 'alloy';
+  getProviderName() { return 'alloy'; }
+  validateConfig(config: Record<string, unknown>) { return !!config.apiKey; }
+
+  async createVerificationSession(data: Record<string, unknown>): Promise<VerificationSession> {
+    const addr = (data.address || {}) as Record<string, unknown>;
+    const evaluation = await this.client.createEvaluation({ type: 'individual', person: { first_name: data.firstName, last_name: data.lastName, dob: data.dob, email: data.email, phone_number: data.phone }, address: { street: addr.street, city: addr.city, state: addr.state, zip_code: addr.zip, country: addr.country } }) as Record<string, unknown>;
+    return { sessionId: String(evaluation.id), status: 'initiated', provider: 'alloy' };
   }
 
-  validateConfig(config: Record<string, unknown>): boolean {
-    return !!config.apiKey;
+  async getVerificationStatus(sessionId: string): Promise<VerificationStatus> {
+    const status = await this.client.getEvaluation(sessionId) as Record<string, unknown>;
+    return { sessionId, status: String(status.status || 'pending'), documents: (status.documents as unknown[]) || [], lastUpdated: String(status.updatedAt || '') };
   }
 
-  async createVerificationSession(data: Record<string, unknown>) {
-    const evaluation = await this.client.createEvaluation({
-      type: 'individual',
-      person: {
-        first_name: data.firstName,
-        last_name: data.lastName,
-        dob: data.dob,
-        email: data.email,
-        phone_number: data.phone,
-      },
-      address: {
-        street: data.address?.street,
-        city: data.address?.city,
-        state: data.address?.state,
-        zip_code: data.address?.zip,
-        country: data.address?.country,
-      },
-      ...(data.metadata || {}),
-    });
-
-    return {
-      sessionId: evaluation.id,
-      status: 'initiated',
-      provider: 'alloy',
-    };
-  }
-
-  async getVerificationStatus(sessionId: string) {
-    const status = await this.client.getEvaluation(sessionId);
-    return {
-      sessionId,
-      status: status.status || 'pending',
-      documents: status.documents || [],
-      lastUpdated: status.updatedAt,
-    };
-  }
-
-  async retrieveVerificationResult(sessionId: string) {
-    const data = await this.client.getEvaluation(sessionId);
-    return {
-      sessionId,
-      result: data,
-      status: data.status || 'pending',
-    };
+  async retrieveVerificationResult(sessionId: string): Promise<VerificationResult> {
+    const data = await this.client.getEvaluation(sessionId) as Record<string, unknown>;
+    return { sessionId, result: data, status: String(data.status || 'pending') };
   }
 
   async handleVerificationUpdate(event: Record<string, unknown>) {
