@@ -1,4 +1,12 @@
-import { IsString, IsOptional, IsBoolean, IsIn, Matches } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsBoolean,
+  IsIn,
+  Matches,
+  ValidateIf,
+  IsDefined,
+} from 'class-validator';
 
 export type WalletType =
   | 'custodial'
@@ -34,8 +42,13 @@ export class LinkWalletDto {
   @IsString()
   auth_provider?: string;
 
-  /** Smart Account contract address (C…). wallet_address stays the G-address. */
-  @IsOptional()
+  /**
+   * Smart Account contract address (C…). wallet_address stays the G-address.
+   * REQUIRED when wallet_type is 'accesly' — an Accesly identity without its
+   * C-address is incomplete.
+   */
+  @ValidateIf((o: LinkWalletDto) => o.wallet_type === 'accesly' || o.c_address !== undefined)
+  @IsDefined({ message: 'c_address is required for accesly wallets' })
   @Matches(/^C[A-Z2-7]{55}$/, { message: 'c_address must be a Soroban contract address (C…)' })
   c_address?: string;
 }
