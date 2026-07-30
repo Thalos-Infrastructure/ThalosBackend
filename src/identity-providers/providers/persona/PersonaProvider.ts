@@ -1,4 +1,9 @@
-import { IdentityVerificationProvider, VerificationSession, VerificationStatus, VerificationResult } from '../../abstraction/IdentityProvider';
+import {
+  IdentityVerificationProvider,
+  VerificationSession,
+  VerificationStatus,
+  VerificationResult,
+} from '../../abstraction/IdentityProvider';
 import { IdentityConfigManager } from '../../abstraction/IdentityConfigManager';
 import { PersonaClient } from './PersonaClient';
 
@@ -10,21 +15,45 @@ export class PersonaProvider implements IdentityVerificationProvider {
     this.client = new PersonaClient(cm.getConfig());
   }
 
-  getProviderName() { return 'persona'; }
-  validateConfig(config: Record<string, unknown>) { return !!config.apiKey; }
+  getProviderName() {
+    return 'persona';
+  }
+  validateConfig(config: Record<string, unknown>) {
+    return !!config.apiKey;
+  }
 
   async createVerificationSession(data: Record<string, unknown>): Promise<VerificationSession> {
-    const inquiry = await this.client.createInquiry({ type: 'individual', attributes: { first_name: data.firstName, last_name: data.lastName, email: data.email, dob: data.dob, address: data.address, phone: data.phone } }) as Record<string, unknown>;
-    return { sessionId: String(inquiry.id), inquiryId: String(inquiry.id), status: 'initiated', provider: 'persona' };
+    const inquiry = (await this.client.createInquiry({
+      type: 'individual',
+      attributes: {
+        first_name: data.firstName,
+        last_name: data.lastName,
+        email: data.email,
+        dob: data.dob,
+        address: data.address,
+        phone: data.phone,
+      },
+    })) as Record<string, unknown>;
+    return {
+      sessionId: String(inquiry.id),
+      inquiryId: String(inquiry.id),
+      status: 'initiated',
+      provider: 'persona',
+    };
   }
 
   async getVerificationStatus(sessionId: string): Promise<VerificationStatus> {
-    const status = await this.client.getInquiry(sessionId) as Record<string, unknown>;
-    return { sessionId, status: String(status.status || 'pending'), documents: (status.documents as unknown[]) || [], lastUpdated: String(status.updatedAt || '') };
+    const status = (await this.client.getInquiry(sessionId)) as Record<string, unknown>;
+    return {
+      sessionId,
+      status: String(status.status || 'pending'),
+      documents: (status.documents as unknown[]) || [],
+      lastUpdated: String(status.updatedAt || ''),
+    };
   }
 
   async retrieveVerificationResult(sessionId: string): Promise<VerificationResult> {
-    const data = await this.client.getInquiry(sessionId) as Record<string, unknown>;
+    const data = (await this.client.getInquiry(sessionId)) as Record<string, unknown>;
     return { sessionId, result: data, status: String(data.status || 'pending') };
   }
 

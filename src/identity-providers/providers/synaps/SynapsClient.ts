@@ -16,7 +16,10 @@ export class SynapsClient {
   private async request(method: string, path: string, data?: unknown): Promise<unknown> {
     const opts: RequestInit = {
       method,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.config.apiKey}` },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.config.apiKey}`,
+      },
       body: data ? JSON.stringify(data) : undefined,
       signal: AbortSignal.timeout(this.config.timeout || 30000),
     };
@@ -25,7 +28,13 @@ export class SynapsClient {
     return await res.json();
   }
 
-  async createSession(data: unknown): Promise<unknown> { return await this.request('POST', '/session', data); }
-  async getSession(sessionId: string): Promise<unknown> { return await this.request('GET', `/session/${sessionId}`); }
-  async updateSession(sessionId: string, data: unknown): Promise<unknown> { return await this.request('PUT', `/session/${sessionId}`, data); }
+  async createSession(data: unknown): Promise<unknown> {
+    return await this.request('POST', '/session', data);
+  }
+  async getSession(sessionId: string): Promise<unknown> {
+    return await this.request('GET', `/session/${sessionId}`);
+  }
+  async updateSession(sessionId: string, data: unknown): Promise<unknown> {
+    return await this.request('PUT', `/session/${sessionId}`, data);
+  }
 }

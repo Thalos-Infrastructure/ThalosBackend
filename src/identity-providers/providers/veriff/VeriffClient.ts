@@ -28,7 +28,13 @@ export class VeriffClient {
     return await res.json();
   }
 
-  async createSession(data: unknown): Promise<unknown> { return await this.request('POST', '/sessions', data); }
-  async getSession(sessionId: string): Promise<unknown> { return await this.request('GET', `/sessions/${sessionId}`); }
-  async getSessionDecision(sessionId: string): Promise<unknown> { return await this.request('GET', `/sessions/${sessionId}/decision`); }
+  async createSession(data: unknown): Promise<unknown> {
+    return await this.request('POST', '/sessions', data);
+  }
+  async getSession(sessionId: string): Promise<unknown> {
+    return await this.request('GET', `/sessions/${sessionId}`);
+  }
+  async getSessionDecision(sessionId: string): Promise<unknown> {
+    return await this.request('GET', `/sessions/${sessionId}/decision`);
+  }
 }

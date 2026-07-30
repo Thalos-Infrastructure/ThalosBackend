@@ -14,7 +14,10 @@ export class StripeClient {
   private async request(method: string, path: string, data?: unknown): Promise<unknown> {
     const opts: RequestInit = {
       method,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.config.apiKey}` },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.config.apiKey}`,
+      },
       body: data ? JSON.stringify(data) : undefined,
       signal: AbortSignal.timeout(this.config.timeout || 30000),
     };
@@ -24,7 +27,10 @@ export class StripeClient {
   }
 
   async createVerificationSession(data: unknown): Promise<unknown> {
-    return await this.request('POST', '/identity/verification_sessions', { type: 'individual', ...(data as Record<string, unknown>).metadata ?? {} });
+    return await this.request('POST', '/identity/verification_sessions', {
+      type: 'individual',
+      ...((data as Record<string, unknown>).metadata ?? {}),
+    });
   }
   async retrieveVerificationSession(sessionId: string): Promise<unknown> {
     return await this.request('GET', `/identity/verification_sessions/${sessionId}`);

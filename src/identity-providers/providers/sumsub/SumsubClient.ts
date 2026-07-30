@@ -23,7 +23,12 @@ export class SumsubClient {
     return jwt.sign({ iat, exp }, this.config.apiSecret, { algorithm: 'HS256' });
   }
 
-  private async request(method: string, path: string, data?: unknown, queryParams?: Record<string, string>): Promise<unknown> {
+  private async request(
+    method: string,
+    path: string,
+    data?: unknown,
+    queryParams?: Record<string, string>,
+  ): Promise<unknown> {
     const token = this.createJwt();
     const url = new URL(path, this.baseUrl);
     if (queryParams) {
@@ -41,7 +46,10 @@ export class SumsubClient {
   }
 
   async createApplicant(userId: string, metadata?: unknown): Promise<unknown> {
-    return await this.request('POST', '/resources/applicants', { externalUserId: userId, ...(metadata as Record<string, unknown>) ?? {} });
+    return await this.request('POST', '/resources/applicants', {
+      externalUserId: userId,
+      ...((metadata as Record<string, unknown>) ?? {}),
+    });
   }
   async getApplicantStatus(applicantId: string): Promise<unknown> {
     return await this.request('GET', `/resources/applicants/${applicantId}/status`);
@@ -50,7 +58,10 @@ export class SumsubClient {
     return await this.request('GET', `/resources/applicants/${applicantId}/one`);
   }
   async generateAccessToken(applicantId: string, levelName?: string): Promise<unknown> {
-    return await this.request('POST', '/resources/accessTokens', { userIdInApp: applicantId, levelName: levelName || 'basic-kyc-level' });
+    return await this.request('POST', '/resources/accessTokens', {
+      userIdInApp: applicantId,
+      levelName: levelName || 'basic-kyc-level',
+    });
   }
   async cancelInspection(applicantId: string): Promise<unknown> {
     return await this.request('POST', `/resources/inspections/${applicantId}/cancel`);

@@ -16,7 +16,10 @@ export class AlloyClient {
   private async request(method: string, path: string, data?: unknown): Promise<unknown> {
     const opts: RequestInit = {
       method,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.config.apiKey}` },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.config.apiKey}`,
+      },
       body: data ? JSON.stringify(data) : undefined,
       signal: AbortSignal.timeout(this.config.timeout || 30000),
     };
@@ -25,7 +28,13 @@ export class AlloyClient {
     return await res.json();
   }
 
-  async createEvaluation(data: unknown): Promise<unknown> { return await this.request('POST', '/evaluations', data); }
-  async getEvaluation(evaluationId: string): Promise<unknown> { return await this.request('GET', `/evaluations/${evaluationId}`); }
-  async cancelEvaluation(evaluationId: string): Promise<unknown> { return await this.request('POST', `/evaluations/${evaluationId}/cancel`); }
+  async createEvaluation(data: unknown): Promise<unknown> {
+    return await this.request('POST', '/evaluations', data);
+  }
+  async getEvaluation(evaluationId: string): Promise<unknown> {
+    return await this.request('GET', `/evaluations/${evaluationId}`);
+  }
+  async cancelEvaluation(evaluationId: string): Promise<unknown> {
+    return await this.request('POST', `/evaluations/${evaluationId}/cancel`);
+  }
 }

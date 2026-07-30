@@ -1,37 +1,68 @@
 import { IdentityProviderFactory } from './abstraction/IdentityProviderFactory';
 import { IdentityConfigManager, IdentityProviderConfig } from './abstraction/IdentityConfigManager';
-import { IdentityVerificationProvider } from './abstraction/IdentityProvider';
-
-// --- Stub provider for factory/contract tests ---
+import {
+  IdentityVerificationProvider,
+  VerificationSession,
+  VerificationStatus,
+  VerificationResult,
+} from './abstraction/IdentityProvider';
 
 class StubProvider implements IdentityVerificationProvider {
   constructor(private config: unknown) {}
-  getProviderName() { return 'stub'; }
-  validateConfig(c: Record<string, unknown>) { return !!c.apiKey; }
-  async createVerificationSession() { return { sessionId: 's1', status: 'initiated', provider: 'stub' }; }
-  async getVerificationStatus(id: string) { return { sessionId: id, status: 'pending' }; }
-  async retrieveVerificationResult(id: string) { return { sessionId: id, status: 'completed', result: {} }; }
-  async handleVerificationUpdate() { return { success: true }; }
-  async cancelVerification() { return { cancelled: true }; }
+  getProviderName() {
+    return 'stub';
+  }
+  validateConfig(c: Record<string, unknown>) {
+    return !!c.apiKey;
+  }
+  async createVerificationSession(): Promise<VerificationSession> {
+    return { sessionId: 's1', status: 'initiated', provider: 'stub' };
+  }
+  async getVerificationStatus(id: string): Promise<VerificationStatus> {
+    return { sessionId: id, status: 'pending' };
+  }
+  async retrieveVerificationResult(id: string): Promise<VerificationResult> {
+    return { sessionId: id, status: 'completed', result: {} };
+  }
+  async handleVerificationUpdate() {
+    return { success: true };
+  }
+  async cancelVerification() {
+    return { cancelled: true };
+  }
 }
 
 class NoKeyProvider implements IdentityVerificationProvider {
   constructor(private config: unknown) {}
-  getProviderName() { return 'nokey'; }
-  validateConfig() { return false; }
-  async createVerificationSession() { throw new Error('no key'); }
-  async getVerificationStatus() { throw new Error('no key'); }
-  async retrieveVerificationResult() { throw new Error('no key'); }
-  async handleVerificationUpdate() { return { success: false }; }
-  async cancelVerification() { throw new Error('no key'); }
+  getProviderName() {
+    return 'nokey';
+  }
+  validateConfig() {
+    return false;
+  }
+  async createVerificationSession(): Promise<VerificationSession> {
+    throw new Error('no key');
+  }
+  async getVerificationStatus(_id: string): Promise<VerificationStatus> {
+    throw new Error('no key');
+  }
+  async retrieveVerificationResult(_id: string): Promise<VerificationResult> {
+    throw new Error('no key');
+  }
+  async handleVerificationUpdate() {
+    return { success: false };
+  }
+  async cancelVerification() {
+    throw new Error('no key');
+  }
 }
-
-// --- IdentityProviderFactory ---
 
 describe('IdentityProviderFactory', () => {
   let factory: IdentityProviderFactory;
 
-  beforeEach(() => { factory = new IdentityProviderFactory(); });
+  beforeEach(() => {
+    factory = new IdentityProviderFactory();
+  });
 
   it('registers and creates a provider', () => {
     factory.register('stub', StubProvider);
@@ -56,8 +87,6 @@ describe('IdentityProviderFactory', () => {
   });
 });
 
-// --- IdentityConfigManager ---
-
 describe('IdentityConfigManager', () => {
   it('builds config from env vars', () => {
     const cm = new IdentityConfigManager({
@@ -77,11 +106,15 @@ describe('IdentityConfigManager', () => {
   });
 
   it('throws if apiKey missing', () => {
-    expect(() => new IdentityConfigManager({ IDENTITY_PROVIDER: 'sumsub' })).toThrow('IDENTITY_API_KEY is required');
+    expect(() => new IdentityConfigManager({ IDENTITY_PROVIDER: 'sumsub' })).toThrow(
+      'IDENTITY_API_KEY is required',
+    );
   });
 
   it('throws if sumsub missing apiSecret', () => {
-    expect(() => new IdentityConfigManager({ IDENTITY_PROVIDER: 'sumsub', IDENTITY_API_KEY: 'k' })).toThrow('IDENTITY_API_SECRET is required for Sumsub');
+    expect(
+      () => new IdentityConfigManager({ IDENTITY_PROVIDER: 'sumsub', IDENTITY_API_KEY: 'k' }),
+    ).toThrow('IDENTITY_API_SECRET is required for Sumsub');
   });
 
   it('updateConfig revalidates', () => {
@@ -95,15 +128,15 @@ describe('IdentityConfigManager', () => {
   });
 });
 
-// --- Interface contract (stub) ---
-
 describe('IdentityVerificationProvider contract', () => {
   let provider: IdentityVerificationProvider;
 
-  beforeEach(() => { provider = new StubProvider({ apiKey: 'test' }); });
+  beforeEach(() => {
+    provider = new StubProvider({ apiKey: 'test' });
+  });
 
   it('createVerificationSession returns correct shape', async () => {
-    const session = await provider.createVerificationSession({});
+    const session = await provider.createVerificationSession();
     expect(session).toHaveProperty('sessionId');
     expect(session).toHaveProperty('status');
     expect(session).toHaveProperty('provider');
