@@ -14,18 +14,35 @@ export interface IdentityProviderConfig {
 export class IdentityConfigManager {
   private config: IdentityProviderConfig;
 
-  constructor(env: Record<string, unknown>) {
-    const e = env as Record<string, string>;
-    this.config = {
-      provider: (e.IDENTITY_PROVIDER || 'sumsub') as ProviderName,
-      apiKey: e.IDENTITY_API_KEY || '',
-      apiSecret: e.IDENTITY_API_SECRET || '',
-      webhookSecret: e.IDENTITY_WEBHOOK_SECRET || '',
-      baseUrl: e.IDENTITY_BASE_URL || '',
-      timeout: parseInt(e.IDENTITY_TIMEOUT || '30000', 10),
-      levelName: e.IDENTITY_LEVEL_NAME || 'basic-kyc-level',
-    };
+  /** Construct from raw env vars (process.env shape). */
+  constructor(env: Record<string, unknown>);
+  /** Construct from an already-parsed config object. */
+  constructor(config: IdentityProviderConfig);
+  constructor(input: Record<string, unknown> | IdentityProviderConfig) {
+    if (this.isEnv(input)) {
+      this.config = this.fromEnv(input);
+    } else {
+      this.config = input as IdentityProviderConfig;
+    }
     this.validateConfig();
+  }
+
+  private isEnv(
+    input: Record<string, unknown> | IdentityProviderConfig,
+  ): input is Record<string, string> {
+    return 'IDENTITY_PROVIDER' in input || 'IDENTITY_API_KEY' in input;
+  }
+
+  private fromEnv(env: Record<string, string>): IdentityProviderConfig {
+    return {
+      provider: (env.IDENTITY_PROVIDER || 'sumsub') as ProviderName,
+      apiKey: env.IDENTITY_API_KEY || '',
+      apiSecret: env.IDENTITY_API_SECRET || '',
+      webhookSecret: env.IDENTITY_WEBHOOK_SECRET || '',
+      baseUrl: env.IDENTITY_BASE_URL || '',
+      timeout: parseInt(env.IDENTITY_TIMEOUT || '30000', 10),
+      levelName: env.IDENTITY_LEVEL_NAME || 'basic-kyc-level',
+    };
   }
 
   private validateConfig() {
