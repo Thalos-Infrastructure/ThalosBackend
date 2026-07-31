@@ -168,15 +168,16 @@ describe('regression: API edge cases (issue #15 / #51 · PR #57)', () => {
       controllers: [AgreementsController],
       providers: [
         AgreementsService,
-        providers: [
-          AgreementsService,
-          AgreementActivityService,
-          AgreementSyncService,
-          AgreementValidationService,
-          { provide: SupabaseService, useValue: supabase },
-          { provide: ConfigService, useValue: { get: jest.fn(() => JWT_SECRET) } },
-          { provide: EventEmitter2, useValue: { emit: jest.fn() } },
-        ],
+        AgreementActivityService,
+        AgreementValidationService,
+        {
+          provide: AgreementSyncService,
+          useValue: { syncMilestone: jest.fn().mockResolvedValue({ success: true }) },
+        },
+        { provide: SupabaseService, useValue: supabase },
+        { provide: ConfigService, useValue: { get: jest.fn(() => JWT_SECRET) } },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
     }).compile();
 
     app = moduleRef.createNestApplication();

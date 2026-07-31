@@ -113,7 +113,11 @@ describe('regression: illegal status transitions blocked (issue #59 / #67 · PR 
       supabase,
       new EventEmitter2(),
       activity,
-      { syncMilestone: jest.fn().mockResolvedValue({ success: true }) } as never,
+      {
+        syncMilestone: jest.fn().mockResolvedValue({ success: true }),
+        syncStatusTransition: jest.fn().mockResolvedValue({ synced: true }),
+        validateContractOnTrustless: jest.fn().mockResolvedValue({ valid: true }),
+      } as never,
       { validateTransition: jest.fn().mockReturnValue({ valid: true }) } as never,
     );
 
