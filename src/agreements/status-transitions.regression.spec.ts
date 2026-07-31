@@ -118,7 +118,14 @@ describe('regression: illegal status transitions blocked (issue #59 / #67 · PR 
         syncStatusTransition: jest.fn().mockResolvedValue({ synced: true }),
         validateContractOnTrustless: jest.fn().mockResolvedValue({ valid: true }),
       } as never,
-      { validateTransition: jest.fn().mockReturnValue({ valid: true }) } as never,
+      {
+        validateTransition: jest.fn().mockImplementation((from, to) => {
+          if (from === 'pending' && to === 'completed') {
+            return { valid: false, reason: 'All milestones must be approved or released' };
+          }
+          return { valid: true };
+        }),
+      } as never,
     );
 
     await expect(

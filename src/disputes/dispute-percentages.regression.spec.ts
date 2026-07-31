@@ -132,11 +132,15 @@ describe('regression: dispute percentage validation (issue #12 / PR #49)', () =>
     const supabase = { getClient: () => db.client } as never;
     const emitter = new EventEmitter2();
     const activity = new AgreementActivityService(supabase);
-    const agreements = new AgreementsService(supabase, emitter, activity, {
-    syncMilestone: jest.fn().mockResolvedValue({ success: true }),
-  } as any, {
-    validateTransition: jest.fn().mockReturnValue({ valid: true }),
-  } as any);
+    const agreements = new AgreementsService(
+      supabase,
+      emitter,
+      activity,
+      {
+        syncMilestone: jest.fn().mockResolvedValue({ success: true }),
+      } as any,
+      new AgreementValidationService(),
+    );
     const disputes = new DisputesService(supabase, agreements, emitter, activity);
 
     await expect(
