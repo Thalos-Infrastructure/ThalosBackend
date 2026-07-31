@@ -139,7 +139,11 @@ describe('regression: agreement activity logging (issue #58 / #61 · PR #100 / #
     const emitter = new EventEmitter2();
     const activity = new AgreementActivityService(supabase);
     const logSpy = jest.spyOn(activity, 'logActivity');
-    const agreements = new AgreementsService(supabase, emitter, activity);
+    const agreements = new AgreementsService(supabase, emitter, activity, {
+    syncMilestone: jest.fn().mockResolvedValue({ success: true }),
+  } as any, {
+    validateTransition: jest.fn().mockReturnValue({ valid: true }),
+  } as any);
     const disputes = new DisputesService(supabase, agreements, emitter, activity);
 
     const result = await disputes.openDispute(USER, {
@@ -215,7 +219,11 @@ describe('regression: agreement activity logging (issue #58 / #61 · PR #100 / #
     const emitter = new EventEmitter2();
     const activity = new AgreementActivityService(supabase);
     const logSpy = jest.spyOn(activity, 'logActivity');
-    const agreements = new AgreementsService(supabase, emitter, activity);
+    const agreements = new AgreementsService(supabase, emitter, activity, {
+    syncMilestone: jest.fn().mockResolvedValue({ success: true }),
+  } as any, {
+    validateTransition: jest.fn().mockReturnValue({ valid: true }),
+  } as any);
     const disputes = new DisputesService(supabase, agreements, emitter, activity);
 
     const result = await disputes.resolveDispute('user-resolver', 'disp-1', {
