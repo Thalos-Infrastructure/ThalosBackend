@@ -3,8 +3,8 @@ import {
   KycStatus,
   SessionResult,
   VerificationResult,
-} from '../../interfaces/kyc-provider.interface';
-import { IdentityProviderConfig } from '../../abstraction/IdentityConfigManager';
+} from '../interfaces/kyc-provider.interface';
+import { IdentityProviderConfig } from '../abstraction/IdentityConfigManager';
 import { SynapsClient } from './synaps/SynapsClient';
 
 export class SynapsKycProvider implements IKycProvider {

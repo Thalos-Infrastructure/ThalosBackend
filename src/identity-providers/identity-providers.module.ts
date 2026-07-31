@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { IdentityProvidersService } from './identity-providers.service';
 import { IdentityProvidersController } from './identity-providers.controller';
-import { KYC_PROVIDER } from './interfaces/kyc-provider.interface';
+import { KYC_PROVIDER, IKycProvider } from './interfaces/kyc-provider.interface';
 import { IdentityProviderConfig } from './abstraction/IdentityConfigManager';
 import { SumsubKycProvider } from './providers/SumsubKycProvider';
 import { PersonaKycProvider } from './providers/PersonaKycProvider';

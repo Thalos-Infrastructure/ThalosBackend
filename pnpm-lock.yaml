@@ -44,6 +44,9 @@ importers:
       class-validator:
         specifier: ^0.14.1
         version: 0.14.4
+      jsonwebtoken:
+        specifier: ^9.0.2
+        version: 9.0.3
       passport:
         specifier: ^0.7.0
         version: 0.7.0
@@ -108,9 +111,6 @@ importers:
       jest-environment-node:
         specifier: ^30.4.1
         version: 30.4.1
-      jsonwebtoken:
-        specifier: ^9.0.2
-        version: 9.0.3
       prettier:
         specifier: ^3.8.4
         version: 3.9.6
