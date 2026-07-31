@@ -1,4 +1,8 @@
-import { MilestoneSyncService, MilestoneSyncPayload, MILESTONE_SYNC_JOB_TYPE } from './milestone-sync.service';
+import {
+  MilestoneSyncService,
+  MilestoneSyncPayload,
+  MILESTONE_SYNC_JOB_TYPE,
+} from './milestone-sync.service';
 import { RetryQueueService, RetryJob } from '../../common/retry/retry-queue.service';
 import { TrustlessRelayError } from '../../internal-trustless/escrow-write.helper';
 
@@ -51,7 +55,7 @@ function makeRetryJob(payload: MilestoneSyncPayload): RetryJob {
     nextRetryAt: new Date(),
     createdAt: new Date(),
     status: 'queued',
-  } as RetryJob;
+  };
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -294,11 +298,9 @@ describe('MilestoneSyncService', () => {
     it('forwards maxRetries option to the shared queue', () => {
       const { svc, enqueue } = buildService();
       svc.enqueueRetry(makePayload(), { maxRetries: 5 });
-      expect(enqueue).toHaveBeenCalledWith(
-        MILESTONE_SYNC_JOB_TYPE,
-        expect.any(Object),
-        { maxRetries: 5 },
-      );
+      expect(enqueue).toHaveBeenCalledWith(MILESTONE_SYNC_JOB_TYPE, expect.any(Object), {
+        maxRetries: 5,
+      });
     });
 
     it('returns the job id from the shared queue', () => {
