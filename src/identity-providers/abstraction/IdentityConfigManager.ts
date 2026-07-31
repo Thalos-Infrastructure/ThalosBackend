@@ -1,4 +1,4 @@
-export type ProviderName = 'sumsub' | 'persona' | 'veriff' | 'synaps' | 'stripe' | 'alloy' | string;
+export type ProviderName = 'sumsub' | 'persona' | 'veriff' | 'synaps' | 'stripe' | 'alloy';
 
 export interface IdentityProviderConfig {
   provider: ProviderName;
@@ -17,7 +17,7 @@ export class IdentityConfigManager {
   constructor(env: Record<string, unknown>) {
     const e = env as Record<string, string>;
     this.config = {
-      provider: e.IDENTITY_PROVIDER || 'sumsub',
+      provider: (e.IDENTITY_PROVIDER || 'sumsub') as ProviderName,
       apiKey: e.IDENTITY_API_KEY || '',
       apiSecret: e.IDENTITY_API_SECRET || '',
       webhookSecret: e.IDENTITY_WEBHOOK_SECRET || '',

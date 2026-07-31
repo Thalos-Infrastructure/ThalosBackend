@@ -3,7 +3,7 @@
  */
 export interface VerificationSession {
   sessionId: string;
-  status: 'initiated' | 'pending' | string;
+  status: 'initiated' | 'pending' | 'completed' | 'rejected' | 'cancelled';
   provider: string;
   [key: string]: unknown;
 }

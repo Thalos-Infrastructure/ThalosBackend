@@ -43,9 +43,9 @@ export class StripeProvider implements IdentityVerificationProvider {
     >;
     return {
       sessionId,
-      status: String(status.status || 'pending'),
+      status: String((status.status as string | undefined) ?? 'pending'),
       documents: (status.documents as unknown[]) || [],
-      lastUpdated: String(status.updatedAt || ''),
+      lastUpdated: String((status.updatedAt as string | undefined) ?? ''),
     };
   }
 
@@ -54,13 +54,17 @@ export class StripeProvider implements IdentityVerificationProvider {
       string,
       unknown
     >;
-    return { sessionId, result: data, status: String(data.status || 'pending') };
+    // prettier-ignore
+    return { sessionId, result: data, status: String((data.status as string | undefined) ?? 'pending') };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async handleVerificationUpdate(event: Record<string, unknown>) {
     const obj = event.data as Record<string, unknown> | undefined;
     const inner = obj?.object as Record<string, unknown> | undefined;
-    console.log(`[Stripe] Verification update for ${inner?.id || 'unknown'}`);
+    console.log(
+      `[Stripe] Verification update for ${String((inner?.id as string | undefined) ?? 'unknown')}`,
+    );
     return { success: true };
   }
 

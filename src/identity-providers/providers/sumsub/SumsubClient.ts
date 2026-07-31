@@ -48,7 +48,7 @@ export class SumsubClient {
   async createApplicant(userId: string, metadata?: unknown): Promise<unknown> {
     return await this.request('POST', '/resources/applicants', {
       externalUserId: userId,
-      ...((metadata as Record<string, unknown>) ?? {}),
+      ...(metadata ?? {}),
     });
   }
   async getApplicantStatus(applicantId: string): Promise<unknown> {

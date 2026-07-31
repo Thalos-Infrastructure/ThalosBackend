@@ -23,7 +23,7 @@ export class SumsubProvider implements IdentityVerificationProvider {
   }
 
   async createVerificationSession(data: Record<string, unknown>): Promise<VerificationSession> {
-    const externalUserId = String(data.externalUserId || '');
+    const externalUserId = String((data.externalUserId as string | undefined) ?? '');
     const { externalUserId: _, ...metadata } = data;
     const applicant = (await this.client.createApplicant(externalUserId, metadata)) as Record<
       string,
@@ -45,10 +45,10 @@ export class SumsubProvider implements IdentityVerificationProvider {
     const status = (await this.client.getApplicantStatus(sessionId)) as Record<string, unknown>;
     return {
       sessionId,
-      status: String(status.reviewStatus || 'pending'),
+      status: String((status.reviewStatus as string | undefined) ?? 'pending'),
       level: status.level,
       documents: (status.documents as unknown[]) || [],
-      lastUpdated: String(status.updatedAt || ''),
+      lastUpdated: String((status.updatedAt as string | undefined) ?? ''),
     };
   }
 
@@ -58,12 +58,13 @@ export class SumsubProvider implements IdentityVerificationProvider {
       sessionId,
       result: data,
       documents: (data.documents as unknown[]) || [],
-      status: String(data.reviewStatus || 'pending'),
+      status: String((data.reviewStatus as string | undefined) ?? 'pending'),
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async handleVerificationUpdate(event: Record<string, unknown>) {
-    console.log(`[Sumsub] Verification update received for ${event.externalUserId}`);
+    console.log(`[Sumsub] Verification update received for ${String(event.externalUserId)}`);
     return { success: true };
   }
 

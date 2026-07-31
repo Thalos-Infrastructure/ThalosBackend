@@ -1,5 +1,6 @@
+/* eslint-disable @typescript-eslint/require-await */
 import { IdentityProviderFactory } from './abstraction/IdentityProviderFactory';
-import { IdentityConfigManager, IdentityProviderConfig } from './abstraction/IdentityConfigManager';
+import { IdentityConfigManager } from './abstraction/IdentityConfigManager';
 import {
   IdentityVerificationProvider,
   VerificationSession,
@@ -15,7 +16,7 @@ class StubProvider implements IdentityVerificationProvider {
   validateConfig(c: Record<string, unknown>) {
     return !!c.apiKey;
   }
-  async createVerificationSession(): Promise<VerificationSession> {
+  async createVerificationSession(_data: Record<string, unknown>): Promise<VerificationSession> {
     return { sessionId: 's1', status: 'initiated', provider: 'stub' };
   }
   async getVerificationStatus(id: string): Promise<VerificationStatus> {
@@ -24,10 +25,10 @@ class StubProvider implements IdentityVerificationProvider {
   async retrieveVerificationResult(id: string): Promise<VerificationResult> {
     return { sessionId: id, status: 'completed', result: {} };
   }
-  async handleVerificationUpdate() {
+  async handleVerificationUpdate(_event: Record<string, unknown>) {
     return { success: true };
   }
-  async cancelVerification() {
+  async cancelVerification(_id: string) {
     return { cancelled: true };
   }
 }
@@ -40,7 +41,7 @@ class NoKeyProvider implements IdentityVerificationProvider {
   validateConfig() {
     return false;
   }
-  async createVerificationSession(): Promise<VerificationSession> {
+  async createVerificationSession(_data: Record<string, unknown>): Promise<VerificationSession> {
     throw new Error('no key');
   }
   async getVerificationStatus(_id: string): Promise<VerificationStatus> {
@@ -49,10 +50,10 @@ class NoKeyProvider implements IdentityVerificationProvider {
   async retrieveVerificationResult(_id: string): Promise<VerificationResult> {
     throw new Error('no key');
   }
-  async handleVerificationUpdate() {
+  async handleVerificationUpdate(_event: Record<string, unknown>) {
     return { success: false };
   }
-  async cancelVerification() {
+  async cancelVerification(_id: string) {
     throw new Error('no key');
   }
 }
@@ -101,8 +102,8 @@ describe('IdentityConfigManager', () => {
     expect(c.levelName).toBe('basic-kyc-level');
   });
 
-  it('throws if provider missing', () => {
-    expect(() => new IdentityConfigManager({})).toThrow('IDENTITY_PROVIDER is required');
+  it('throws if apiKey missing (defaults provider to sumsub)', () => {
+    expect(() => new IdentityConfigManager({})).toThrow('IDENTITY_API_KEY is required');
   });
 
   it('throws if apiKey missing', () => {
@@ -136,7 +137,7 @@ describe('IdentityVerificationProvider contract', () => {
   });
 
   it('createVerificationSession returns correct shape', async () => {
-    const session = await provider.createVerificationSession();
+    const session = await provider.createVerificationSession({ externalUserId: 'user-123' });
     expect(session).toHaveProperty('sessionId');
     expect(session).toHaveProperty('status');
     expect(session).toHaveProperty('provider');

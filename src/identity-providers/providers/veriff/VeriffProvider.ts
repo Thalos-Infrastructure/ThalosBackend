@@ -40,19 +40,21 @@ export class VeriffProvider implements IdentityVerificationProvider {
     const status = (await this.client.getSession(sessionId)) as Record<string, unknown>;
     return {
       sessionId,
-      status: String(status.status || 'pending'),
+      status: String((status.status as string | undefined) ?? 'pending'),
       decision: status.decision,
-      lastUpdated: String(status.updatedAt || ''),
+      lastUpdated: String((status.updatedAt as string | undefined) ?? ''),
     };
   }
 
   async retrieveVerificationResult(sessionId: string): Promise<VerificationResult> {
     const data = (await this.client.getSession(sessionId)) as Record<string, unknown>;
-    return { sessionId, result: data, status: String(data.status || 'pending') };
+    // prettier-ignore
+    return { sessionId, result: data, status: String((data.status as string | undefined) ?? 'pending') };
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async handleVerificationUpdate(event: Record<string, unknown>) {
-    console.log(`[Veriff] Verification update for ${event.sessionId}`);
+    console.log(`[Veriff] Verification update for ${String(event.sessionId)}`);
     return { success: true };
   }
 
