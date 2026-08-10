@@ -1,8 +1,9 @@
 import { Controller, Post, Get, Param, Body, UseGuards, HttpCode } from '@nestjs/common';
 import { IdentityProvidersService } from './identity-providers.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { WebhookSecretGuard } from './webhook-secret.guard';
 
-@Controller('kyc')
+@Controller('identity-providers')
 export class IdentityProvidersController {
   constructor(private readonly identityProvidersService: IdentityProvidersService) {}
 
@@ -20,6 +21,7 @@ export class IdentityProvidersController {
   }
 
   @Post('webhook')
+  @UseGuards(WebhookSecretGuard)
   async processWebhook(@Body() payload: unknown) {
     return await this.identityProvidersService.processWebhook(payload);
   }

@@ -3,6 +3,7 @@ import { IdentityProvidersService } from './identity-providers.service';
 import { IdentityProvidersController } from './identity-providers.controller';
 import { KYC_PROVIDER, KycStatus } from './interfaces/kyc-provider.interface';
 import { IdentityConfigManager, IdentityProviderConfig } from './abstraction/IdentityConfigManager';
+import { WebhookSecretGuard } from './webhook-secret.guard';
 
 class MockKycProvider {
   readonly name = 'mock';
@@ -80,9 +81,11 @@ describe('IdentityProvidersController', () => {
   let mockService: jest.Mocked<IdentityProvidersService>;
 
   beforeEach(async () => {
+    process.env.KYC_WEBHOOK_SECRET = 'test-webhook-secret';
     const module: TestingModule = await Test.createTestingModule({
       controllers: [IdentityProvidersController],
       providers: [
+        WebhookSecretGuard,
         {
           provide: IdentityProvidersService,
           useValue: {
@@ -98,7 +101,7 @@ describe('IdentityProvidersController', () => {
     mockService = module.get(IdentityProvidersService);
   });
 
-  describe('POST /kyc/session', () => {
+  describe('POST /identity-providers/session', () => {
     it('should create a session', async () => {
       const mockResponse = {
         providerVerificationId: 'test-id',
@@ -113,7 +116,7 @@ describe('IdentityProvidersController', () => {
     });
   });
 
-  describe('GET /kyc/status/:id', () => {
+  describe('GET /identity-providers/status/:id', () => {
     it('should get status', async () => {
       const mockResponse = {
         status: KycStatus.VERIFIED,
@@ -128,7 +131,7 @@ describe('IdentityProvidersController', () => {
     });
   });
 
-  describe('POST /kyc/webhook', () => {
+  describe('POST /identity-providers/webhook', () => {
     it('should process webhook', async () => {
       const payload = { test: 'data' };
       const mockResponse = {
@@ -142,6 +145,50 @@ describe('IdentityProvidersController', () => {
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(mockService.processWebhook).toHaveBeenCalledWith(payload);
     });
+  });
+});
+
+describe('WebhookSecretGuard', () => {
+  let guard: WebhookSecretGuard;
+
+  beforeEach(() => {
+    guard = new WebhookSecretGuard();
+  });
+
+  afterEach(() => {
+    delete process.env.KYC_WEBHOOK_SECRET;
+  });
+
+  it('throws if KYC_WEBHOOK_SECRET not configured', () => {
+    delete process.env.KYC_WEBHOOK_SECRET;
+    const mockContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({ headers: {} }),
+      }),
+    };
+    expect(() => guard.canActivate(mockContext as never)).toThrow(
+      'KYC_WEBHOOK_SECRET not configured',
+    );
+  });
+
+  it('throws if header does not match', () => {
+    process.env.KYC_WEBHOOK_SECRET = 'secret';
+    const mockContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({ headers: { 'x-kyc-webhook-secret': 'wrong' } }),
+      }),
+    };
+    expect(() => guard.canActivate(mockContext as never)).toThrow('Invalid webhook secret');
+  });
+
+  it('passes if header matches', () => {
+    process.env.KYC_WEBHOOK_SECRET = 'secret';
+    const mockContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({ headers: { 'x-kyc-webhook-secret': 'secret' } }),
+      }),
+    };
+    expect(guard.canActivate(mockContext as never)).toBe(true);
   });
 });
 

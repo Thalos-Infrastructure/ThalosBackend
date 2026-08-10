@@ -6,6 +6,7 @@
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AgreementsService } from './agreements.service';
 import { AgreementActivityService } from './agreement-activity.service';
+import { AgreementValidationService } from './validation/agreement-validation.service';
 import { DisputesService } from '../disputes/disputes.service';
 
 type Row = Record<string, unknown>;
