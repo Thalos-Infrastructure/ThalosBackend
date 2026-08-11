@@ -630,6 +630,8 @@ describe('AgreementsService lifecycle enforcement (business rules)', () => {
         milestoneDescription: 'Build',
         milestoneAmount: '100.00',
         asset: 'USDC',
+        contractId: expect.any(String),
+        serviceType: null,
         approvedByWallet: PAYER_WALLET,
       });
     });

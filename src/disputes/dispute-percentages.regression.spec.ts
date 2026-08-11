@@ -7,6 +7,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DisputesService } from './disputes.service';
 import { AgreementsService } from '../agreements/agreements.service';
 import { AgreementActivityService } from '../agreements/agreement-activity.service';
+import { AgreementValidationService } from '../agreements/validation/agreement-validation.service';
 
 type Row = Record<string, unknown>;
 
@@ -132,7 +133,15 @@ describe('regression: dispute percentage validation (issue #12 / PR #49)', () =>
     const supabase = { getClient: () => db.client } as never;
     const emitter = new EventEmitter2();
     const activity = new AgreementActivityService(supabase);
-    const agreements = new AgreementsService(supabase, emitter, activity);
+    const agreements = new AgreementsService(
+      supabase,
+      emitter,
+      activity,
+      {
+        syncMilestone: jest.fn().mockResolvedValue({ success: true }),
+      } as any,
+      new AgreementValidationService(),
+    );
     const disputes = new DisputesService(supabase, agreements, emitter, activity);
 
     await expect(

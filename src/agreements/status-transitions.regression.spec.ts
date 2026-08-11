@@ -109,7 +109,24 @@ describe('regression: illegal status transitions blocked (issue #59 / #67 · PR 
     );
     const supabase = { getClient: () => db.client } as never;
     const activity = new AgreementActivityService(supabase);
-    const svc = new AgreementsService(supabase, new EventEmitter2(), activity);
+    const svc = new AgreementsService(
+      supabase,
+      new EventEmitter2(),
+      activity,
+      {
+        syncMilestone: jest.fn().mockResolvedValue({ success: true }),
+        syncStatusTransition: jest.fn().mockResolvedValue({ synced: true }),
+        validateContractOnTrustless: jest.fn().mockResolvedValue({ valid: true }),
+      } as never,
+      {
+        validateTransition: jest.fn().mockImplementation((from, to) => {
+          if (from === 'pending' && to === 'completed') {
+            return { valid: false, reason: 'All milestones must be approved or released' };
+          }
+          return { valid: true };
+        }),
+      } as never,
+    );
 
     await expect(
       svc.updateStatus('user-1', 'agr-1', { actor_wallet: 'GWALLET', status: 'completed' }),

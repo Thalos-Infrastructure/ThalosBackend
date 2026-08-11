@@ -1,8 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import {
-  RetryQueueService,
-  JobHandler,
-} from '../../common/retry/retry-queue.service';
+import { RetryQueueService, JobHandler } from '../../common/retry/retry-queue.service';
 import {
   approveMilestone,
   changeMilestoneStatus,
@@ -56,7 +53,7 @@ export class MilestoneSyncService implements OnModuleInit {
 
   onModuleInit(): void {
     const handler: JobHandler = async (job) => {
-      const payload = job.payload as unknown as MilestoneSyncPayload;
+      const payload = job.payload as MilestoneSyncPayload;
       return this.handleMilestoneUpdateJob(payload);
     };
     this.retryQueue.registerHandler(MILESTONE_SYNC_JOB_TYPE, handler);
@@ -82,9 +79,7 @@ export class MilestoneSyncService implements OnModuleInit {
    * Local milestone status must stay 'awaiting_signature' until the
    * escrow.milestone_updated webhook fires and confirms the on-chain state.
    */
-  async pushMilestoneToTW(
-    payload: MilestoneSyncPayload,
-  ): Promise<{ unsignedTransaction: string }> {
+  async pushMilestoneToTW(payload: MilestoneSyncPayload): Promise<{ unsignedTransaction: string }> {
     const type = this.toTWServiceType(payload.agreementType);
 
     let result: unknown;
@@ -127,7 +122,7 @@ export class MilestoneSyncService implements OnModuleInit {
   detectConflict(localStatus: string, twStatus: string): boolean {
     const terminal = new Set<string>(['approved', 'released', 'rejected', 'cancelled']);
     if (!terminal.has(localStatus)) return false; // local hasn't settled — normal apply path
-    if (localStatus === twStatus) return false;   // already in sync
+    if (localStatus === twStatus) return false; // already in sync
     // approved → released is a valid forward step on TW, not a divergent conflict
     if (localStatus === 'approved' && twStatus === 'released') return false;
     return terminal.has(twStatus); // both settled in incompatible terminal states

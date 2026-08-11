@@ -13,6 +13,8 @@ import * as jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { AuthModule } from '../auth/auth.module';
 import { SupabaseService } from '../supabase/supabase.service';
+import { AgreementSyncService } from '../agreements/sync/agreement-sync.service';
+import { AgreementValidationService } from '../agreements/validation/agreement-validation.service';
 import { AgreementsController } from '../agreements/agreements.controller';
 import { AgreementActivityService } from '../agreements/agreement-activity.service';
 import { AgreementsService } from '../agreements/agreements.service';
@@ -167,6 +169,11 @@ describe('regression: API edge cases (issue #15 / #51 · PR #57)', () => {
       providers: [
         AgreementsService,
         AgreementActivityService,
+        AgreementValidationService,
+        {
+          provide: AgreementSyncService,
+          useValue: { syncMilestone: jest.fn().mockResolvedValue({ success: true }) },
+        },
         { provide: SupabaseService, useValue: supabase },
         { provide: ConfigService, useValue: { get: jest.fn(() => JWT_SECRET) } },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
@@ -190,7 +197,7 @@ describe('regression: API edge cases (issue #15 / #51 · PR #57)', () => {
   });
 
   afterAll(async () => {
-    await app.close();
+    await app?.close();
   });
 
   const tokenFor = (sub = USER_ID) =>
