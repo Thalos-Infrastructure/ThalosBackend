@@ -6,6 +6,7 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AgreementActivityService } from '../agreements/agreement-activity.service';
 import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
+import { validateTransition } from '../agreements/agreement.validator';
 import { RetryQueueService } from '../retry-queue/retry-queue.service';
 import { RetryJobType } from '../retry-queue/retry-queue.types';
 import type { TrustlessWorkEventDto } from './dto/trustless-work-event.dto';
@@ -37,6 +38,10 @@ const TW_EVENT_MAP: Record<string, EventConfig> = {
   'escrow.milestone_updated': { action: 'milestone_update' },
   'escrow.dispute_created': { action: 'status_update', targetStatus: 'disputed' },
   'dispute.created': { action: 'status_update', targetStatus: 'disputed' },
+  'milestone.completed': { action: 'milestone_update' },
+  'milestone.approved': { action: 'milestone_update' },
+  'milestone.rejected': { action: 'milestone_update' },
+  'milestone.cancelled': { action: 'milestone_update' },
 };
 
 @Injectable()
@@ -131,6 +136,41 @@ export class WebhooksService implements OnModuleInit {
     payload: TrustlessWorkEventDto,
     targetStatus: string,
   ): Promise<void> {
+    const { data: current, error: selectError } = await this.supabase
+      .getClient()
+      .from('agreements')
+      .select('status, id')
+      .eq('contract_id', payload.contractId)
+      .maybeSingle();
+    if (selectError) {
+      this.logger.error(
+        `Validation SELECT failed for contractId="${payload.contractId}": ${selectError.message}`,
+      );
+      throw new Error(selectError.message);
+    }
+    if (current) {
+      const transitionValidation = validateTransition(current.status as string, targetStatus);
+      if (!transitionValidation.success) {
+        this.logger.warn(
+          `Invalid transition from TW webhook: "${current.status}" → "${targetStatus}" for ` +
+            `contractId="${payload.contractId}" — skipping. ${JSON.stringify(transitionValidation.error)}`,
+        );
+        await this.activity.logActivity(
+          current.id,
+          'trustless-work-webhook',
+          'webhook_transition_rejected',
+          {
+            event: payload.event,
+            contractId: payload.contractId,
+            from: current.status,
+            to: targetStatus,
+            reason: transitionValidation.error,
+          },
+        );
+        return;
+      }
+    }
+
     const updates: Record<string, unknown> = {
       status: targetStatus,
       updated_at: new Date().toISOString(),

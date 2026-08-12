@@ -366,7 +366,7 @@ describe('retry queue (integration) — WebhooksService reuses the shared queue'
       {
         id: 'agr-1',
         contract_id: 'c-100',
-        status: 'created',
+        status: 'pending',
         title: 'Test',
         amount: '10',
         asset: 'USDC',
@@ -405,7 +405,7 @@ describe('retry queue (integration) — WebhooksService reuses the shared queue'
     expect(result).toEqual({ handled: true });
 
     // Enqueued but not yet processed — the poller hasn't run.
-    expect(localStore.tables.agreements[0].status).toBe('created');
+    expect(localStore.tables.agreements[0].status).toBe('pending');
 
     await localRetryQueue.processDueJobs();
 

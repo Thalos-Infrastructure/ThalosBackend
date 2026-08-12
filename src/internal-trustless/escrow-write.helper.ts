@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { relayToTrustless } from './trustless-relay.helper';
+import { validateAgreement } from '../agreements/agreement.validator';
 import type {
   ApproveMilestoneDto,
   ChangeMilestoneStatusDto,
@@ -107,6 +108,24 @@ function buildAgreementBody(dto: CreateEscrowDto) {
   };
 }
 
+const UPSTREAM_ERROR = 'UPSTREAM_ERROR';
+
+export function formatUpstreamError(data: unknown) {
+  const message =
+    data && typeof data === 'object' && 'message' in data
+      ? String((data as Record<string, unknown>).message)
+      : typeof data === 'string'
+        ? data
+        : JSON.stringify(data);
+  return {
+    success: false,
+    error: {
+      code: UPSTREAM_ERROR,
+      details: [{ field: 'upstream', code: UPSTREAM_ERROR, message }],
+    },
+  };
+}
+
 /**
  * POST a Trustless Work y devuelve la respuesta tal cual (p. ej. { unsignedTransaction }).
  * Lanza TrustlessRelayError si el upstream falla (preserva el status para que el caller
@@ -184,6 +203,29 @@ export function buildReleaseFundsRequest(dto: ReleaseFundsDto): RelayRequest {
 
 export function createEscrow(dto: CreateEscrowDto): Promise<unknown> {
   const { path, body } = buildCreateEscrowRequest(dto);
+
+  const isMulti = dto.serviceType === 'multi-release';
+  const milestones = dto.milestones.map((m) => ({
+    description: m.description,
+    amount: isMulti ? (m.amount ?? null) : dto.amount,
+    status: m.status ?? 'pending',
+  }));
+  const agreementInput = {
+    title: dto.title,
+    description: dto.description,
+    amount: isMulti
+      ? milestones.reduce((sum, m) => sum + Number(m.amount), 0).toFixed(2)
+      : dto.amount,
+    asset: 'USDC',
+    agreement_type: isMulti ? 'multi' : 'single',
+    milestones,
+    participants: [{ wallet_address: dto.signer, role: 'payer' }],
+  };
+  const validation = validateAgreement(agreementInput);
+  if (!validation.success) {
+    throw new BadRequestException({ success: false, error: validation.error });
+  }
+
   return relayWrite(path, body);
 }
 

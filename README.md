@@ -68,6 +68,8 @@ The server listens on port **3001** by default with a global `v1` prefix.
 | `pnpm run start` | Start without watch |
 | `pnpm run build` | Compile to `dist/` |
 | `pnpm run start:prod` | Run the compiled build (`node dist/main`) |
+| `pnpm test` | Run Jest unit + integration + regression specs |
+| `pnpm exec jest regression --runInBand` | Run only `*.regression.spec.ts` |
 
 There is also a `smoke-test-backend.ps1` PowerShell script for a quick end-to-end check.
 
@@ -192,5 +194,7 @@ left off, instead of losing in-flight work.
 
 ## Docs
 
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution guide; **bug fixes require a regression test**.
+- [`docs/integration-tests.md`](docs/integration-tests.md) — integration fixtures, KYC/KYB suite, and [regression suite index](docs/integration-tests.md#regression-test-suite-issue-69).
 - [`docs/SCOPE.md`](docs/SCOPE.md) — closed scope decisions.
 - [`docs/EMAIL_NOTIFICATIONS_PLAN.md`](docs/EMAIL_NOTIFICATIONS_PLAN.md) — event-driven email notifications plan (epic + tickets).

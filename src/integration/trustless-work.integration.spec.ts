@@ -11,6 +11,8 @@ import { AgreementActivityService } from '../agreements/agreement-activity.servi
 import type { AgreementStatus } from '../agreements/agreement-lifecycle';
 import { AgreementsController } from '../agreements/agreements.controller';
 import { AgreementsService } from '../agreements/agreements.service';
+import { AgreementSyncService } from '../agreements/sync/agreement-sync.service';
+import { AgreementValidationService } from '../agreements/validation/agreement-validation.service';
 import { AuthModule } from '../auth/auth.module';
 import { EscrowsController } from '../internal-trustless/escrows.controller';
 import { relayToTrustless } from '../internal-trustless/trustless-relay.helper';
@@ -402,6 +404,16 @@ describe('Trustless Work end-to-end integration', () => {
             ),
           },
         },
+        {
+          provide: AgreementSyncService,
+          useValue: {
+            syncAgreement: jest.fn().mockResolvedValue({ synced: true }),
+            syncStatusTransition: jest.fn().mockResolvedValue({ synced: true }),
+            validateContractOnTrustless: jest.fn().mockResolvedValue({ valid: true }),
+            reconcileAgreement: jest.fn().mockResolvedValue({ reconciled: true }),
+          },
+        },
+        AgreementValidationService,
       ],
     }).compile();
 

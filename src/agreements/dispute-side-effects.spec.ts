@@ -1,6 +1,8 @@
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AgreementsService } from './agreements.service';
 import { AgreementActivityService } from './agreement-activity.service';
+import { AgreementSyncService } from './sync/agreement-sync.service';
+import { AgreementValidationService } from './validation/agreement-validation.service';
 import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
 import { DisputesService } from '../disputes/disputes.service';
 import { DISPUTE_OPENED, DISPUTE_RESOLVED } from '../common/constants/notification-events';
@@ -133,7 +135,14 @@ function makeAgreements(db: ReturnType<typeof buildDb>, emitter: EventEmitter2) 
   const activity = new AgreementActivityService(supabase);
   // spy so tests can assert shared path — keep the Mock handle (avoids unbound-method)
   const logActivity = jest.spyOn(activity, 'logActivity');
-  const svc = new AgreementsService(supabase, emitter, activity);
+  const syncEngine = {
+    syncAgreement: jest.fn().mockResolvedValue({ synced: true, actions: [] }),
+    syncStatusTransition: jest.fn().mockResolvedValue({ synced: true }),
+    validateContractOnTrustless: jest.fn().mockResolvedValue({ valid: true }),
+    reconcileAgreement: jest.fn().mockResolvedValue({ reconciled: true, actions: [] }),
+  } as unknown as AgreementSyncService;
+  const validation = new AgreementValidationService();
+  const svc = new AgreementsService(supabase, emitter, activity, syncEngine, validation);
   return { svc, activity, logActivity };
 }
 

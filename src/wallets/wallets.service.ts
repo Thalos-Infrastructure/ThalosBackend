@@ -513,7 +513,11 @@ export class WalletsService {
 
     const sig = createHmac('sha256', secret).update(payloadB64).digest('base64url');
 
+    // SEP-53 canonical envelope: "Stellar Signed Message:\n" + body.
+    // Wallets sign SHA-256(envelopeBytes). The HMAC Proof line is appended
+    // after signing so it never influences the signature bytes.
     const message =
+      `Stellar Signed Message:\n` +
       `${WALLET_OWNERSHIP_PREFIX}\n` +
       `\n` +
       `I authorize linking this wallet to my Thalos account.\n` +

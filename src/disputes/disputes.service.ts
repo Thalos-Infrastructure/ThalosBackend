@@ -7,8 +7,9 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SupabaseService } from '../supabase/supabase.service';
 import { AgreementsService } from '../agreements/agreements.service';
+import { validateTransition } from '../agreements/agreement.validator';
 import { AgreementActivityService } from '../agreements/agreement-activity.service';
-import { DISPUTE_OPENED, DISPUTE_RESOLVED } from '../common/constants/notification-events';
+import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
 import {
   OpenDisputeDto,
   AssignResolverDto,
@@ -139,11 +140,24 @@ export class DisputesService {
       dto.opened_by,
       'disputed',
       {
+        enforceTransition: true,
         activityDetails: { dispute_id: dispute.id, reason: dto.reason, source: 'dispute' },
       },
     );
     if (!statusResult.success) {
-      return { dispute: null, error: statusResult.error || 'Failed to mark agreement disputed' };
+      throw new BadRequestException({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          details: [
+            {
+              field: 'status',
+              code: 'INVALID_TRANSITION',
+              message: statusResult.error || 'Invalid status transition',
+            },
+          ],
+        },
+      });
     }
 
     // Dispute-specific activity entry (parity with existing audit vocabulary)
@@ -155,7 +169,7 @@ export class DisputesService {
       { previousState: statusResult.fromStatus ?? null, newState: 'disputed' },
     );
 
-    this.eventEmitter.emit(DISPUTE_OPENED, {
+    this.eventEmitter.emit(AGREEMENT_EVENTS.DISPUTE_OPENED, {
       disputeId: dispute.id,
       agreementId: dto.agreement_id,
       openedByWallet: dto.opened_by,
@@ -272,6 +286,7 @@ export class DisputesService {
       dto.resolved_by,
       'resolved',
       {
+        enforceTransition: true,
         activityDetails: {
           dispute_id: disputeId,
           payer_percentage: dto.payer_percentage,
@@ -297,7 +312,7 @@ export class DisputesService {
       { previousState: statusResult.fromStatus ?? 'disputed', newState: 'resolved' },
     );
 
-    this.eventEmitter.emit(DISPUTE_RESOLVED, {
+    this.eventEmitter.emit(AGREEMENT_EVENTS.DISPUTE_RESOLVED, {
       disputeId,
       agreementId: dispute.agreement_id,
       resolvedByWallet: dto.resolved_by,
@@ -342,6 +357,18 @@ export class DisputesService {
 
     if (error) {
       return { success: false, error: error.message };
+    }
+
+    // Validate the transition before delegating to applyStatusChange
+    const { data: agreement } = await this.supabase
+      .getClient()
+      .from('agreements')
+      .select('status')
+      .eq('id', dispute.agreement_id)
+      .single();
+    const transitionValidation = validateTransition(agreement?.status as string, 'active');
+    if (!transitionValidation.success) {
+      throw new BadRequestException({ success: false, error: transitionValidation.error });
     }
 
     // Shared side-effect path: dispute cancelled → agreement back to active

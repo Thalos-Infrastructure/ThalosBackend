@@ -11,12 +11,11 @@ import { LinkContractDto } from './dto/link-contract.dto';
 import { UpdateAgreementStatusDto } from './dto/update-status.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
 import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
-import {
-  canTransition,
-  invalidTransitionMessage,
-  milestonesSatisfyCompletion,
-} from './agreement-lifecycle';
+import { milestonesSatisfyCompletion } from './agreement-lifecycle';
+import { validateAgreement, validateAgreementConsistency } from './agreement.validator';
 import { AgreementActivityService } from './agreement-activity.service';
+import { AgreementSyncService } from './sync/agreement-sync.service';
+import { AgreementValidationService } from './validation/agreement-validation.service';
 
 @Injectable()
 export class AgreementsService {
@@ -24,6 +23,8 @@ export class AgreementsService {
     private readonly supabase: SupabaseService,
     private readonly eventEmitter: EventEmitter2,
     private readonly activity: AgreementActivityService,
+    private readonly syncEngine: AgreementSyncService,
+    private readonly validation: AgreementValidationService,
   ) {}
 
   private async walletForUserId(userId: string): Promise<string | null> {
@@ -91,6 +92,11 @@ export class AgreementsService {
   }
 
   async create(userId: string, dto: CreateAgreementDto) {
+    const validation = validateAgreement(dto);
+    if (!validation.success) {
+      return { agreement: null, error: validation.error };
+    }
+
     await this.assertActorWallet(userId, dto.created_by);
 
     const createdByProfileId = await this.profileIdByWallet(dto.created_by);
@@ -180,12 +186,28 @@ export class AgreementsService {
       participantWallets: dto.participants.map((p) => p.wallet_address),
     });
 
+    // 🔁 Trigger sync on creation (if contract_id is present)
+    if (agreement.contract_id) {
+      this.syncEngine
+        .syncAgreement(agreement.id, { useRetryQueue: true })
+        .catch((err) => console.error('Post-create sync error:', err));
+    }
+
     return { agreement, error: null };
   }
 
   async linkContract(userId: string, agreementId: string, dto: LinkContractDto) {
     await this.assertCanAccessAgreement(userId, agreementId);
     await this.assertActorWallet(userId, dto.actor_wallet);
+
+    // 🔍 Validate contract_id against Trustless Work BEFORE persisting
+    const twValidation = await this.syncEngine.validateContractOnTrustless(dto.contract_id);
+    if (!twValidation.valid) {
+      return {
+        success: false,
+        error: twValidation.error ?? 'Contract not found on Trustless Work',
+      };
+    }
 
     const { error } = await this.supabase
       .getClient()
@@ -201,6 +223,12 @@ export class AgreementsService {
     await this.activity.logActivity(agreementId, dto.actor_wallet, 'contract_linked', {
       contract_id: dto.contract_id,
     });
+
+    // 🔁 Trigger sync after successful link
+    this.syncEngine
+      .syncAgreement(agreementId, { useRetryQueue: true })
+      .catch((err) => console.error('Post-link sync error:', err));
+
     return { success: true, error: null };
   }
 
@@ -221,14 +249,28 @@ export class AgreementsService {
 
     const fromStatus = current.status as string;
 
-    if (!canTransition(fromStatus, dto.status)) {
-      throw new BadRequestException(invalidTransitionMessage(fromStatus, dto.status));
+    // 🛡 Validate transition using centralized validation layer
+    const transitionValidation = this.validation.validateTransition(fromStatus, dto.status);
+    if (!transitionValidation.valid) {
+      throw new BadRequestException({ success: false, error: transitionValidation.reason });
     }
 
+    // Main's additional validation: milestones must be satisfied for completion
     if (dto.status === 'completed' && !milestonesSatisfyCompletion(current.milestones)) {
-      throw new BadRequestException(
-        'All milestones must be approved or released before the agreement can be completed',
-      );
+      throw new BadRequestException({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          details: [
+            {
+              field: 'status',
+              code: 'INVALID_TRANSITION',
+              message:
+                'All milestones must be approved or released before the agreement can be completed',
+            },
+          ],
+        },
+      });
     }
 
     const updates: Record<string, unknown> = {
@@ -261,6 +303,11 @@ export class AgreementsService {
       { previousState: fromStatus, newState: dto.status },
     );
 
+    // 🔁 Sync the transition with TW
+    this.syncEngine
+      .syncStatusTransition(agreementId, fromStatus, dto.status)
+      .catch((err) => console.error('Post-status-change sync error:', err));
+
     if (dto.status === 'funded') {
       this.eventEmitter.emit(AGREEMENT_EVENTS.FUNDED, {
         agreementId,
@@ -289,7 +336,7 @@ export class AgreementsService {
     const { data: agreement, error: fetchError } = await this.supabase
       .getClient()
       .from('agreements')
-      .select('milestones')
+      .select('id, title, amount, asset, milestones, agreement_type, contract_id')
       .eq('id', agreementId)
       .single();
 
@@ -310,8 +357,8 @@ export class AgreementsService {
     }
 
     const milestone = milestones[dto.milestone_index];
-    const emitsEvidence = dto.evidence_description !== undefined || dto.evidence_urls !== undefined;
     const previousMilestoneStatus = milestone.status;
+    const emitsEvidence = dto.evidence_description !== undefined || dto.evidence_urls !== undefined;
 
     milestone.status = dto.status;
 
@@ -323,6 +370,14 @@ export class AgreementsService {
     }
     if (emitsEvidence) {
       milestone.evidence_submitted_at = new Date().toISOString();
+    }
+
+    const consistency = validateAgreementConsistency({
+      amount: agreement.amount,
+      milestones,
+    });
+    if (!consistency.success) {
+      throw new BadRequestException({ success: false, error: consistency.error });
     }
 
     const { error: updateError } = await this.supabase
@@ -342,12 +397,70 @@ export class AgreementsService {
       `milestone_${dto.status}`,
       {
         milestone_index: dto.milestone_index,
-        milestone_description: milestones[dto.milestone_index].description,
+        milestone_description: milestone.description,
         from: previousMilestoneStatus,
         to: dto.status,
+        milestone_amount: milestone.amount,
+        asset: (agreement.asset as string) ?? 'USDC',
+        evidence_description: dto.evidence_description,
+        evidence_urls: dto.evidence_urls,
       },
       { previousState: previousMilestoneStatus, newState: dto.status },
     );
+
+    const agreementTitle = (agreement.title as string) ?? agreementId;
+    const asset = (agreement.asset as string) ?? 'USDC';
+    const contractId = (agreement.contract_id as string | null) ?? null;
+    const serviceType = (agreement.agreement_type as string | null) ?? null;
+
+    if (emitsEvidence) {
+      this.eventEmitter.emit(AGREEMENT_EVENTS.EVIDENCE_SUBMITTED, {
+        agreementId: agreement.id as string,
+        agreementTitle,
+        milestoneIndex: dto.milestone_index,
+        milestoneDescription: milestone.description,
+        milestoneAmount: milestone.amount,
+        asset,
+        submittedByWallet: dto.actor_wallet,
+        evidenceDescription: dto.evidence_description,
+        evidenceUrls: dto.evidence_urls,
+      });
+    }
+
+    if (previousMilestoneStatus !== 'approved' && dto.status === 'approved') {
+      this.eventEmitter.emit(AGREEMENT_EVENTS.MILESTONE_APPROVED, {
+        agreementId: agreement.id as string,
+        agreementTitle,
+        milestoneIndex: dto.milestone_index,
+        milestoneDescription: milestone.description,
+        milestoneAmount: milestone.amount,
+        asset,
+        approvedByWallet: dto.actor_wallet,
+        contractId,
+        serviceType,
+      });
+    }
+
+    if (dto.status === 'released') {
+      this.eventEmitter.emit(AGREEMENT_EVENTS.MILESTONE_RELEASED, {
+        agreementId,
+        agreementTitle,
+        milestoneIndex: dto.milestone_index,
+        milestoneDescription: milestone.description,
+        milestoneAmount: milestone.amount,
+        asset,
+        contractId,
+        serviceType,
+        actorWallet: dto.actor_wallet,
+        evidence: dto.evidence_description,
+      });
+    }
+
+    // 🔁 Trigger sync after milestone update
+    this.syncEngine
+      .syncAgreement(agreementId, { useRetryQueue: true })
+      .catch((err) => console.error('Post-milestone sync error:', err));
+
     return { success: true, error: null };
   }
 
@@ -482,8 +595,11 @@ export class AgreementsService {
 
     const fromStatus = options.fromStatus ?? (current.status as string);
 
-    if (options.enforceTransition && !canTransition(fromStatus, toStatus)) {
-      return { success: false, error: invalidTransitionMessage(fromStatus, toStatus) };
+    if (options.enforceTransition) {
+      const tv = this.validation.validateTransition(fromStatus, toStatus);
+      if (!tv.valid) {
+        return { success: false, error: tv.reason };
+      }
     }
 
     const updates: Record<string, unknown> = {

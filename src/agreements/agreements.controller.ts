@@ -18,20 +18,33 @@ import { CreateAgreementDto } from './dto/create-agreement.dto';
 import { LinkContractDto } from './dto/link-contract.dto';
 import { UpdateAgreementStatusDto } from './dto/update-status.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
+import { AgreementSyncService } from './sync/agreement-sync.service';
 
 @ApiTags('agreements')
 @ApiBearerAuth('bearer')
 @Controller('agreements')
 @UseGuards(JwtAuthGuard)
 export class AgreementsController {
-  constructor(private readonly agreements: AgreementsService) {}
+  constructor(
+    private readonly agreements: AgreementsService,
+    private readonly syncEngine: AgreementSyncService,
+  ) {}
 
   @Post()
   @HttpCode(201)
   async create(@CurrentUser() user: AuthUserCtx, @Body() dto: CreateAgreementDto) {
     const result = await this.agreements.create(user.userId, dto);
     if (result.error) {
-      throw new BadRequestException(result.error);
+      if (typeof result.error === 'object' && 'code' in result.error) {
+        throw new BadRequestException({ success: false, error: result.error });
+      }
+      throw new BadRequestException({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          details: [{ field: 'body', code: 'VALIDATION_ERROR', message: result.error }],
+        },
+      });
     }
     return result;
   }
@@ -81,5 +94,33 @@ export class AgreementsController {
     @Body() dto: UpdateMilestoneDto,
   ) {
     return this.agreements.updateMilestone(user.userId, id, dto);
+  }
+
+  // ── Sync & Reconciliation ─────────────────────────────────────────────
+
+  @Post(':id/sync')
+  @HttpCode(200)
+  async syncAgreement(
+    @CurrentUser() user: AuthUserCtx,
+    @Param('id') id: string,
+    @Query('useRetryQueue') useRetryQueue?: string,
+  ) {
+    await this.agreements.getById(user.userId, id);
+    return this.syncEngine.syncAgreement(id, {
+      useRetryQueue: useRetryQueue === 'true',
+    });
+  }
+
+  @Post(':id/reconcile')
+  @HttpCode(200)
+  async reconcileAgreement(
+    @CurrentUser() user: AuthUserCtx,
+    @Param('id') id: string,
+    @Query('useRetryQueue') useRetryQueue?: string,
+  ) {
+    await this.agreements.getById(user.userId, id);
+    return this.syncEngine.reconcileAgreement(id, {
+      useRetryQueue: useRetryQueue === 'true',
+    });
   }
 }
