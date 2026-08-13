@@ -3,6 +3,23 @@
 -- (ThalosFrontend#108); columns are guarded with IF NOT EXISTS so whichever
 -- migration runs first wins.
 
+-- user_wallets.user_id must reference the backend's public.auth_users: the
+-- API authenticates against auth_users (custom JWT), not Supabase Auth's
+-- auth.users, so 001's FK rejects every insert the backend attempts.
+ALTER TABLE public.user_wallets
+  DROP CONSTRAINT IF EXISTS user_wallets_user_id_fkey;
+ALTER TABLE public.user_wallets
+  ADD CONSTRAINT user_wallets_user_id_fkey
+  FOREIGN KEY (user_id) REFERENCES public.auth_users(id) ON DELETE CASCADE;
+
+-- 001's CHECK predates Accesly — recreate it so wallet_type accepts 'accesly'
+-- (mirrors the LinkWalletDto whitelist).
+ALTER TABLE public.user_wallets
+  DROP CONSTRAINT IF EXISTS user_wallets_wallet_type_check;
+ALTER TABLE public.user_wallets
+  ADD CONSTRAINT user_wallets_wallet_type_check
+  CHECK (wallet_type IN ('custodial', 'freighter', 'lobstr', 'xbull', 'albedo', 'accesly', 'other'));
+
 -- Login method that produced the wallet: 'accesly', 'pollar', etc.
 ALTER TABLE public.user_wallets
   ADD COLUMN IF NOT EXISTS auth_provider text;
