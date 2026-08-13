@@ -9,13 +9,7 @@ import {
 } from 'class-validator';
 
 export type WalletType =
-  | 'custodial'
-  | 'freighter'
-  | 'lobstr'
-  | 'xbull'
-  | 'albedo'
-  | 'accesly'
-  | 'other';
+  'custodial' | 'freighter' | 'lobstr' | 'xbull' | 'albedo' | 'accesly' | 'other';
 
 export class LinkWalletDto {
   @IsString()

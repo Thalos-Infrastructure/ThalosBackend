@@ -36,17 +36,17 @@ function makeSupabase(state: MockState): SupabaseService {
         select: () => builder,
         eq: () => builder,
         neq: () => builder,
-        maybeSingle: async () => {
+        maybeSingle: () => {
           if (table === 'auth_users') {
-            return {
+            return Promise.resolve({
               data:
                 state.authUserWallet === undefined
                   ? null
                   : { wallet_public_key: state.authUserWallet },
               error: null,
-            };
+            });
           }
-          return { data: null, error: null }; // no existing user_wallets link
+          return Promise.resolve({ data: null, error: null }); // no existing user_wallets link
         },
         insert: (row: Record<string, unknown>) => {
           insertCalls += 1;
@@ -57,7 +57,7 @@ function makeSupabase(state: MockState): SupabaseService {
               : { data: { id: 'wallet-row-1', ...row }, error: null };
           return builder;
         },
-        single: async () => insertResult,
+        single: () => Promise.resolve(insertResult),
         update: (row: Record<string, unknown>) => {
           state.updates.push({ table, row });
           return builder;
@@ -82,7 +82,7 @@ function acceslyDto(overrides: Partial<LinkWalletDto> = {}): LinkWalletDto {
     wallet_type: 'accesly',
     c_address: C_ADDRESS,
     ...overrides,
-  } as LinkWalletDto;
+  };
 }
 
 describe('WalletsService.linkWallet — accesly identity (#109)', () => {

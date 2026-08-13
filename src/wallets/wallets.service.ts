@@ -236,9 +236,7 @@ export class WalletsService {
         .eq('id', userId)
         .maybeSingle();
       if (authUser?.wallet_public_key !== dto.wallet_address) {
-        throw new ForbiddenException(
-          'Accesly wallet does not match the authenticated user',
-        );
+        throw new ForbiddenException('Accesly wallet does not match the authenticated user');
       }
       isVerified = true;
       verifiedAt = new Date().toISOString();
