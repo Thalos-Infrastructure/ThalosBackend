@@ -29,6 +29,10 @@ export interface UserWallet {
   verified_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Login method that produced this wallet ('accesly', 'pollar', …). #108/#109 */
+  auth_provider?: string | null;
+  /** Soroban Smart Account address (C…); wallet_address holds the G-address. */
+  c_address?: string | null;
 }
 
 export interface WalletWithBalance extends UserWallet {
@@ -215,6 +219,27 @@ export class WalletsService {
       // Custodial wallets are auto-verified
       isVerified = true;
       verifiedAt = new Date().toISOString();
+    } else if (dto.wallet_type === 'accesly') {
+      // Accesly (passkey smart account, #109) can't produce a classic SEP-0043
+      // wallet signature here, but ownership of the G-address was already
+      // proven server-side: the app JWT is minted only after the frontend
+      // wallet-challenge verify (raw Ed25519 over the challenge, signed with
+      // the same reconstructed owner key), which binds
+      // auth_users.wallet_public_key to the address. Accept that proof.
+      if (!dto.c_address) {
+        throw new BadRequestException('c_address is required for accesly wallets');
+      }
+      const { data: authUser } = await this.supabase
+        .getClient()
+        .from('auth_users')
+        .select('wallet_public_key')
+        .eq('id', userId)
+        .maybeSingle();
+      if (authUser?.wallet_public_key !== dto.wallet_address) {
+        throw new ForbiddenException('Accesly wallet does not match the authenticated user');
+      }
+      isVerified = true;
+      verifiedAt = new Date().toISOString();
     } else {
       // Non-custodial: require signed_message + signature
       if (!dto.signed_message || !dto.signature) {
@@ -247,26 +272,69 @@ export class WalletsService {
       verifiedAt = new Date().toISOString();
     }
 
-    const { data, error } = await this.supabase
+    const baseRow = {
+      user_id: userId,
+      wallet_address: dto.wallet_address,
+      wallet_type: dto.wallet_type,
+      label: dto.label || null,
+      is_primary: isPrimary,
+      is_verified: isVerified,
+      verified_at: verifiedAt,
+    };
+
+    // Accesly (#109) / Pollar (FE #108) identity: login method + Smart Account
+    // C-address. wallet_address keeps the derived G-address, which is what
+    // Trustless Work role matching (by-signer / by-role) keys on.
+    const authProvider =
+      dto.auth_provider ?? (dto.wallet_type === 'accesly' ? 'accesly' : undefined);
+    const identityRow = {
+      ...baseRow,
+      ...(authProvider ? { auth_provider: authProvider } : {}),
+      ...(dto.c_address ? { c_address: dto.c_address } : {}),
+    };
+
+    let { data, error } = await this.supabase
       .getClient()
       .from('user_wallets')
-      .insert({
-        user_id: userId,
-        wallet_address: dto.wallet_address,
-        wallet_type: dto.wallet_type,
-        label: dto.label || null,
-        is_primary: isPrimary,
-        is_verified: isVerified,
-        verified_at: verifiedAt,
-      })
+      .insert(identityRow)
       .select()
       .single();
+
+    // Fall back to the base row while migration 008 hasn't been applied.
+    if (error && error.code === 'PGRST204') {
+      console.warn(
+        `[wallets] user_wallets is missing the identity columns (migration 008 pending) — ` +
+          `linking ${dto.wallet_address} WITHOUT auth_provider/c_address`,
+      );
+      ({ data, error } = await this.supabase
+        .getClient()
+        .from('user_wallets')
+        .insert(baseRow)
+        .select()
+        .single());
+    }
 
     if (error) {
       if (error.code === '23505') {
         throw new ConflictException('Wallet is already linked to an account');
       }
       return { wallet: null, error: error.message };
+    }
+
+    // Persist the login method on the auth user so the frontend's
+    // /api/auth/me can echo it and route signing to the right provider
+    // after a reload. Non-fatal (and a no-op until migration 008 runs).
+    if (authProvider) {
+      const { error: providerError } = await this.supabase
+        .getClient()
+        .from('auth_users')
+        .update({ wallet_provider: authProvider })
+        .eq('id', userId);
+      if (providerError) {
+        console.warn(
+          `[wallets] could not persist auth_users.wallet_provider=${authProvider}: ${providerError.message}`,
+        );
+      }
     }
 
     return { wallet: data as UserWallet, error: null };
