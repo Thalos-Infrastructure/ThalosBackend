@@ -60,9 +60,15 @@ assertNotProduction(TARGET_URL);
 /** API global prefix (Nest uses setGlobalPrefix('v1')). */
 const API_PREFIX = process.env.THALOS_API_PREFIX ?? 'v1';
 
-/** Same secret the app/frontend use to sign JWTs (HS256). */
+/**
+ * Same secret the app/frontend use to sign JWTs (HS256). Resolved exactly like
+ * the API does (see src/auth/app-jwt.contract.ts): SUPABASE_JWT_SECRET first,
+ * then the legacy JWT_SECRET.
+ */
 const JWT_SECRET =
-  process.env.JWT_SECRET || 'load-test-secret-do-not-use-in-prod-32chars!!';
+  process.env.SUPABASE_JWT_SECRET ||
+  process.env.JWT_SECRET ||
+  'load-test-secret-do-not-use-in-prod-32chars!!';
 
 /** Seeded test identity. On staging these must match a real seeded user. */
 const TEST_USER_ID = process.env.LOAD_TEST_USER_ID || 'load-test-user-0001';

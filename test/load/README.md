@@ -49,8 +49,8 @@ pnpm test:load
 
 - The seeded user must exist in `auth_users` with `wallet_public_key = LOAD_TEST_WALLET`
   (a **testnet** wallet).
-- `LOAD_TEST_JWT` lets you run without knowing `JWT_SECRET`. Alternatively set
-  `JWT_SECRET` and a token is minted for you.
+- `LOAD_TEST_JWT` lets you run without knowing the shared secret. Alternatively set
+  `SUPABASE_JWT_SECRET` (or the legacy `JWT_SECRET`) and a token is minted for you.
 - Resource (CPU/RSS) sampling only works for the **local mock** (self-reported over
   IPC — see below); for staging, read CPU/memory from the hosting platform's
   metrics — the report marks these `n/a`.

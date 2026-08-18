@@ -21,7 +21,7 @@ secure server-side **relay to the Trustless Work (TW) escrow API**, notification
 ## Environment
 
 Copy `.env.example` → `.env.local` (values in the example are working dev secrets).
-Key vars: `JWT_SECRET` (HS256; **must be identical to the frontend's**),
+Key vars: `SUPABASE_JWT_SECRET` (HS256; **must be identical to the frontend's**; `JWT_SECRET` is a legacy fallback — see `docs/auth-contract.md`),
 `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`, `TRUSTLESSWORK_API_URL` +
 `TRUSTLESSWORK_API_KEY` (server-only), `THALOS_INTERNAL_SECRET` (must match frontend),
 `RESEND_API_KEY`, `PORT` (3001), `THALOS_CORS_ORIGIN` (http://localhost:3000).
@@ -31,7 +31,7 @@ Supabase project ref: `cpkjclwvgnxgadiaoaei`.
 
 - **Auth (`src/auth/`)** — the backend only *validates* JWTs; it never signs them
   (token signing is the frontend's responsibility — see `auth.module.ts`). `JwtStrategy`
-  verifies HS256 with `JWT_SECRET`; payload is `{ sub, email? }`; `validate()` returns
+  verifies HS256 with the shared secret; payload is `{ sub, email? }`; `validate()` returns
   `req.user = { userId: sub, email }`. Use `@UseGuards(JwtAuthGuard)` + `@CurrentUser()`.
 - **Trustless Work relay (`src/internal-trustless/`)** — `relayToTrustless(method, path, query?, body?)`
   in `trustless-relay.helper.ts` forwards to `TRUSTLESSWORK_API_URL` with the server-side

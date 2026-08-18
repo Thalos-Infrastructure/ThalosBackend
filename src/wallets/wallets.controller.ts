@@ -14,7 +14,10 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthUserCtx } from '../auth/current-user.decorator';
 import { WalletsService } from './wallets.service';
 import { LinkWalletDto, UpdateWalletDto, VerifyWalletDto } from './dto/wallets.dto';
-import { VerificationChallengeQueryDto } from './dto/verification-challenge.dto';
+import {
+  VerificationChallengeQueryDto,
+  VerificationChallengeResponseDto,
+} from './dto/verification-challenge.dto';
 
 @ApiTags('wallets')
 @ApiBearerAuth('bearer')
@@ -73,14 +76,18 @@ export class WalletsController {
     description: 'Stellar public key (G..., 56 chars)',
     example: 'GA7QYNF7SOWQ3GLR2BGMZEHHHVSH3VK4UFR2QPYDQGPHK3WSALDQXJZN',
   })
-  @ApiResponse({ status: 200, description: 'Challenge generated' })
+  @ApiResponse({
+    status: 200,
+    description: 'Challenge generated',
+    type: VerificationChallengeResponseDto,
+  })
   @ApiResponse({ status: 400, description: 'Invalid Stellar address' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @Get('verification-challenge')
   getVerificationChallenge(
     @CurrentUser() user: AuthUserCtx,
     @Query() query: VerificationChallengeQueryDto,
-  ) {
+  ): VerificationChallengeResponseDto {
     return this.walletsService.generateVerificationChallenge(user.userId, query.address);
   }
 
