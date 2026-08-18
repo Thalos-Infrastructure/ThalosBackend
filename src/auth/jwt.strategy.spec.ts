@@ -4,11 +4,15 @@
  * Covers the three validation scenarios required by the security task:
  *   1. A real frontend-signed HS256 token is accepted.
  *   2. Invalid / expired / wrong-secret tokens are rejected (UnauthorizedException).
- *   3. The app fails fast when JWT_SECRET is unset (no silent insecure default).
+ *   3. The app fails fast when no shared secret is configured (no insecure default).
+ *
+ * The end-to-end HTTP contract with the Next BFF (real guard, real Bearer header)
+ * lives in `next-bff-jwt.integration.spec.ts`.
  */
 import { UnauthorizedException } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
 import { JwtStrategy, JwtPayload } from './jwt.strategy';
+import { MissingAppJwtSecretError } from './app-jwt.contract';
 
 const REAL_SECRET = 'super-test-secret-32-chars-minimum!!';
 const OTHER_SECRET = 'different-secret-will-cause-failure!';
@@ -26,16 +30,20 @@ function signFrontendToken(
   });
 }
 
-/** Create a JwtStrategy instance with JWT_SECRET set in the environment */
+/** Create a JwtStrategy instance with the shared secret set in the environment */
 function makeStrategy(secret: string): JwtStrategy {
-  process.env.JWT_SECRET = secret;
+  process.env.SUPABASE_JWT_SECRET = secret;
   const strategy = new JwtStrategy();
   return strategy;
 }
 
-afterEach(() => {
+/** Both accepted variable names must be cleared to simulate "no secret". */
+function clearSecrets(): void {
+  delete process.env.SUPABASE_JWT_SECRET;
   delete process.env.JWT_SECRET;
-});
+}
+
+afterEach(clearSecrets);
 
 // ─── 1. Valid token ───────────────────────────────────────────────────────────
 
@@ -113,16 +121,22 @@ describe('JwtStrategy.validate — rejection cases', () => {
   });
 });
 
-// ─── 3. Fail-fast when JWT_SECRET is unset ────────────────────────────────────
+// ─── 3. Fail-fast when no shared secret is configured ─────────────────────────
 
 describe('JwtStrategy constructor — missing secret', () => {
-  it('throws an error at instantiation when JWT_SECRET is not set', () => {
-    delete process.env.JWT_SECRET; // ensure it's absent
-    expect(() => new JwtStrategy()).toThrow('JWT_SECRET is required');
+  it('throws at instantiation when no shared secret is set', () => {
+    clearSecrets();
+    expect(() => new JwtStrategy()).toThrow(MissingAppJwtSecretError);
+  });
+
+  it('accepts the legacy JWT_SECRET name', () => {
+    clearSecrets();
+    process.env.JWT_SECRET = REAL_SECRET;
+    expect(() => new JwtStrategy()).not.toThrow();
   });
 
   it('does NOT fall back to any insecure default', () => {
-    delete process.env.JWT_SECRET;
+    clearSecrets();
     // The constructor must throw, not silently continue with a default value.
     let thrownError: unknown;
     try {

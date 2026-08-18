@@ -25,7 +25,7 @@ Copy [`.env.example`](.env.example) to `.env.local` and fill in real values. `.e
 
 | Variable | Required | Description |
 |---|---|---|
-| `JWT_SECRET` | Yes | Secret used to verify the app JWT (HS256). **Must be identical** to the frontend's `JWT_SECRET`, or tokens are rejected with 401. |
+| `SUPABASE_JWT_SECRET` | Yes | Secret used to verify the app JWT minted by the Next BFF (HS256). **Must be identical** to the frontend's `SUPABASE_JWT_SECRET`, or tokens are rejected with 401. Also HMACs the wallet-ownership challenge. `JWT_SECRET` is accepted as a legacy fallback when this is unset. See [`docs/auth-contract.md`](docs/auth-contract.md). |
 | `SUPABASE_URL` | Yes | Supabase project URL (same project the frontend uses). |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Supabase service role key. Server-side only — full DB access, keep secret. |
 | `THALOS_INTERNAL_SECRET` | Yes | Shared secret for the internal Next.js → Nest relay (`x-thalos-internal-secret`). Must match the frontend's value. |
@@ -118,7 +118,7 @@ Next.js  ──/api/* (server)──►  NestJS (v1/*)  ──►  Supabase (Pos
 
 Two independent mechanisms:
 
-1. **App JWT (`Bearer`)** — protects user-facing routes via `JwtAuthGuard`. The token must be signed with `JWT_SECRET` (HS256), unexpired, and carry a `sub` claim. Issued by the frontend on login.
+1. **App JWT (`Bearer`)** — protects user-facing routes via `JwtAuthGuard`. The token must be signed with the shared secret (`SUPABASE_JWT_SECRET`, HS256), unexpired, and carry a `sub` claim. Issued by the Next BFF on login; this API only verifies it. The full contract — claims, rejection cases, secret resolution and the wallet-challenge payload — is documented in [`docs/auth-contract.md`](docs/auth-contract.md).
 2. **Internal secret (`x-thalos-internal-secret`)** — protects server-to-server routes via `InternalSecretGuard`. Intended only for the Next.js server, never the browser.
 
 The browser must call the Next.js frontend (`/api/...`), which forwards to this backend — this keeps secrets server-side and avoids CORS issues.

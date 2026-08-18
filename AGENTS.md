@@ -24,7 +24,7 @@ Variables are read from `.env` (not `.env.example` — that file does not exist)
 |-----|-------|
 | `SUPABASE_URL` | Public project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | **Service role** key, not anon |
-| `JWT_SECRET` | HS256, must match ThalosFrontend |
+| `SUPABASE_JWT_SECRET` | HS256 secret the Next BFF signs the app JWT with; must match ThalosFrontend byte-for-byte. `JWT_SECRET` is read as a fallback. See `docs/auth-contract.md` |
 | `THALOS_INTERNAL_SECRET` | Shared with Next for `/api/trustless/relay` |
 | `TRUSTLESSWORK_API_URL` | Base URL for Trustless Work API |
 | `TRUSTLESSWORK_API_KEY` | API key for Trustless Work |
@@ -43,7 +43,7 @@ Variables are read from `.env` (not `.env.example` — that file does not exist)
 
 Two auth schemes in Swagger:
 
-1. **Bearer JWT** (`JwtAuthGuard`) — most endpoints. Uses `passport-jwt` with `HS256` only. `JWT_SECRET` must match the frontend. The `sub` claim is the user ID, injected via `@CurrentUser()` decorator as `{ userId, email? }`.
+1. **Bearer JWT** (`JwtAuthGuard`) — most endpoints. Uses `passport-jwt` with `HS256` only; the secret (`SUPABASE_JWT_SECRET`, falling back to `JWT_SECRET`) must match the frontend. The `sub` claim is the user ID, injected via `@CurrentUser()` decorator as `{ userId, email? }`.
 2. **`x-thalos-internal-secret`** header (`InternalSecretGuard`) — only `POST /v1/internal/trustless/relay`. Matching `THALOS_INTERNAL_SECRET`.
 
 ### Module layout

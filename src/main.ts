@@ -38,7 +38,8 @@ async function bootstrap() {
         type: 'http',
         scheme: 'bearer',
         bearerFormat: 'JWT',
-        description: 'JWT de la app (mismo JWT_SECRET que el frontend).',
+        description:
+          'JWT de la app, emitido por el BFF de Next (HS256, mismo SUPABASE_JWT_SECRET que el frontend). Ver docs/auth-contract.md.',
       },
       'bearer',
     )

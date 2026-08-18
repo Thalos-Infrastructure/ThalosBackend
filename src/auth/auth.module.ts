@@ -10,8 +10,10 @@ import { JwtAuthGuard } from './jwt-auth.guard';
  * The backend only verifies incoming HS256 tokens; JwtModule (signing helpers) is
  * therefore intentionally absent to keep the boundary clear.
  *
- * JWT_SECRET must be set in the environment — the app fails fast at startup if it is
- * missing (see JwtStrategy constructor).
+ * The shared HS256 secret (`SUPABASE_JWT_SECRET`, or the legacy `JWT_SECRET`) must be
+ * set in the environment — the app fails fast at startup if it is missing (see
+ * JwtStrategy constructor / `app-jwt.contract.ts`). The full contract is documented in
+ * `docs/auth-contract.md`.
  */
 @Module({
   imports: [PassportModule.register({ defaultStrategy: 'jwt' })],

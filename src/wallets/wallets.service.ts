@@ -10,7 +10,9 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ApiClient } from '../common/api/api-client';
+import { resolveAppJwtSecret } from '../auth/app-jwt.contract';
 import { LinkWalletDto, UpdateWalletDto, VerifyWalletDto, WalletType } from './dto/wallets.dto';
+import { VerificationChallengeResponseDto } from './dto/verification-challenge.dto';
 import {
   WALLET_OWNERSHIP_PREFIX,
   networkPassphrase,
@@ -78,6 +80,23 @@ export class WalletsService {
       this.stellarNetwork === 'mainnet'
         ? 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN' // Circle USDC mainnet
         : 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'; // Testnet USDC
+  }
+
+  /**
+   * Shared HS256 secret used to HMAC ("Proof: …") the wallet-ownership
+   * challenge, resolved through the same contract as the app-JWT verification
+   * (`SUPABASE_JWT_SECRET`, falling back to `JWT_SECRET`). Issuing and
+   * verifying a challenge therefore can never drift onto different secrets.
+   *
+   * The value is never surfaced to the caller: a misconfigured environment
+   * yields a generic 500.
+   */
+  private challengeSecret(): string {
+    try {
+      return resolveAppJwtSecret((key) => this.config.get<string>(key));
+    } catch {
+      throw new InternalServerErrorException('Server misconfiguration');
+    }
   }
 
   /**
@@ -248,10 +267,7 @@ export class WalletsService {
         );
       }
 
-      const jwtSecret = this.config.get<string>('JWT_SECRET');
-      if (!jwtSecret) {
-        throw new InternalServerErrorException('Server misconfiguration');
-      }
+      const jwtSecret = this.challengeSecret();
 
       // 1. Parse & verify the HMAC-proofed challenge
       const payload = parseAndVerifyChallenge(dto.signed_message, jwtSecret);
@@ -554,12 +570,9 @@ export class WalletsService {
 
   /**
    * Generate a stateless wallet ownership verification challenge (SEP-0043 style).
-   * HMAC-SHA256 signed with JWT_SECRET.
+   * HMAC-SHA256 signed with the shared app-JWT secret.
    */
-  generateVerificationChallenge(
-    userId: string,
-    address: string,
-  ): { message: string; expires_at: string } {
+  generateVerificationChallenge(userId: string, address: string): VerificationChallengeResponseDto {
     const TTL_MS = 5 * 60 * 1000;
     const issuedAt = new Date();
     const expiresAt = new Date(issuedAt.getTime() + TTL_MS);
@@ -574,10 +587,7 @@ export class WalletsService {
     };
     const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
 
-    const secret = this.config.get<string>('JWT_SECRET');
-    if (!secret) {
-      throw new InternalServerErrorException('Server misconfiguration');
-    }
+    const secret = this.challengeSecret();
 
     const sig = createHmac('sha256', secret).update(payloadB64).digest('base64url');
 
@@ -633,10 +643,7 @@ export class WalletsService {
       throw new BadRequestException('Wallet address does not match');
     }
 
-    const jwtSecret = this.config.get<string>('JWT_SECRET');
-    if (!jwtSecret) {
-      throw new InternalServerErrorException('Server misconfiguration');
-    }
+    const jwtSecret = this.challengeSecret();
 
     // 1. Parse & verify the HMAC-proofed challenge
     const payload = parseAndVerifyChallenge(dto.signed_message, jwtSecret);
