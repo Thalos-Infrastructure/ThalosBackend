@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   HttpCode,
+  Logger,
   OnModuleInit,
   Param,
   Post,
@@ -33,6 +34,8 @@ import {
 @Controller('escrows')
 @UseGuards(JwtAuthGuard)
 export class EscrowsController implements OnModuleInit {
+  private readonly logger = new Logger(EscrowsController.name);
+
   // NOTE: write endpoints require a valid JWT (class-level JwtAuthGuard) but do NOT
   // bind the JWT user to `signer`. Authorization of the actual signer is enforced by
   // the on-chain signature: build endpoints only return an UNSIGNED XDR, and the
@@ -170,11 +173,36 @@ export class EscrowsController implements OnModuleInit {
   /**
    * POST /escrows/change-milestone-status
    * Cambiar el estado de un milestone (evidencia + status). Devuelve { unsignedTransaction }.
+   *
+   * @deprecated Use `PATCH /v1/agreements/:id/milestones` instead.
+   * This endpoint is the deprecated duplicate of the canonical evidence submission path.
+   * Kept for backward compatibility with existing TW-proxy callers (GF-4-BE / issue #142).
+   * Legacy status values (e.g. "completed") are normalized to canonical Thalos values
+   * (e.g. "released") before forwarding to Trustless Work.
    */
   @Post('change-milestone-status')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Cambiar estado de milestone (devuelve XDR sin firmar)' })
+  @ApiOperation({
+    summary: 'Cambiar estado de milestone (devuelve XDR sin firmar)',
+    description:
+      '@deprecated Use PATCH /v1/agreements/:id/milestones instead (canonical evidence endpoint). ' +
+      'This endpoint is kept for backward compatibility only.',
+    deprecated: true,
+  })
   async changeMilestoneStatus(@Body() dto: ChangeMilestoneStatusDto) {
+    this.logger.warn(
+      'POST /escrows/change-milestone-status is deprecated. ' +
+        'Use PATCH /v1/agreements/:id/milestones instead (GF-4-BE / #142).',
+    );
+
+    // Normalize legacy TW status values (e.g. "completed" → "released")
+    // before forwarding to Trustless Work.
+    const { normalizeMilestoneStatus } = await import('../common/milestone-status');
+    const normalizedStatus = normalizeMilestoneStatus(dto.newStatus);
+    if (normalizedStatus) {
+      dto.newStatus = normalizedStatus;
+    }
+
     return this.writeWithBackstop(
       RetryJobType.MILESTONE_UPDATE,
       `milestone_update:status:${dto.contractId}:${dto.milestoneIndex}:${dto.newStatus}`,

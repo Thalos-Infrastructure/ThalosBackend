@@ -108,6 +108,14 @@ export class ApproveMilestoneDto {
 
 /* ---------------- Change milestone status ---------------- */
 
+/**
+ * @deprecated Use `PATCH /v1/agreements/:id/milestones` instead (canonical evidence
+ * endpoint — see GF-4-BE / issue #142). This endpoint remains for backward compatibility
+ * with existing TW-proxy callers but will be removed in a future release.
+ *
+ * Legacy TW values (e.g. "completed") are normalized to the canonical Thalos enum
+ * before being forwarded to Trustless Work. See `normalizeMilestoneStatus()`.
+ */
 export class ChangeMilestoneStatusDto {
   @IsString()
   contractId: string;
@@ -118,6 +126,11 @@ export class ChangeMilestoneStatusDto {
   @IsString()
   newEvidence: string;
 
+  /**
+   * Milestone status to set. Accepts canonical Thalos values
+   * (`pending`, `approved`, `released`, `rejected`) **and** legacy Trustless Work
+   * values (`completed` → mapped to `released`).
+   */
   @IsString()
   newStatus: string;
 
