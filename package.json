@@ -50,7 +50,7 @@
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
     "@types/jsonwebtoken": "^9.0.7",
-    "@types/node": "^22.10.0",
+    "@types/node": "^26.2.0",
     "@types/passport-jwt": "^4.0.1",
     "@types/supertest": "^7.2.1",
     "autocannon": "^8.0.0",
