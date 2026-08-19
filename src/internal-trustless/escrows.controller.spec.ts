@@ -162,7 +162,7 @@ describe('EscrowsController — retry queue backstop', () => {
     );
   });
 
-  it('changeMilestoneStatus normalizes legacy TW status "completed" to "released" and logs deprecation', async () => {
+  it('passes legacy TW status "completed" through unchanged and logs deprecation', async () => {
     mockedRelay.mockReturnValueOnce(twResponse(500, {}));
     const { controller, enqueue } = buildController();
 
@@ -177,11 +177,13 @@ describe('EscrowsController — retry queue backstop', () => {
 
     await expect(controller.changeMilestoneStatus(dto)).rejects.toBeDefined();
 
-    // The status should have been normalized from "completed" → "released"
-    // before being used in the idempotency key and forwarded to TW.
+    // The TW proxy body and idempotency key must retain the caller's TW status.
     const [, , key] = enqueue.mock.calls[0];
-    expect(key).toContain('released');
-    expect(key).not.toContain('completed');
+    expect(key).toContain('completed');
+    expect(key).not.toContain('released');
+    expect(enqueue.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ body: expect.objectContaining({ newStatus: 'completed' }) }),
+    );
   });
 
   it('changeMilestoneStatus passes through canonical statuses unchanged', async () => {

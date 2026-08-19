@@ -177,8 +177,8 @@ export class EscrowsController implements OnModuleInit {
    * @deprecated Use `PATCH /v1/agreements/:id/milestones` instead.
    * This endpoint is the deprecated duplicate of the canonical evidence submission path.
    * Kept for backward compatibility with existing TW-proxy callers (GF-4-BE / issue #142).
-   * Legacy status values (e.g. "completed") are normalized to canonical Thalos values
-   * (e.g. "released") before forwarding to Trustless Work.
+   * TW status values are passed through unchanged; normalization belongs to inbound
+   * webhook/reconciliation persistence paths.
    */
   @Post('change-milestone-status')
   @HttpCode(200)
@@ -194,14 +194,6 @@ export class EscrowsController implements OnModuleInit {
       'POST /escrows/change-milestone-status is deprecated. ' +
         'Use PATCH /v1/agreements/:id/milestones instead (GF-4-BE / #142).',
     );
-
-    // Normalize legacy TW status values (e.g. "completed" → "released")
-    // before forwarding to Trustless Work.
-    const { normalizeMilestoneStatus } = await import('../common/milestone-status');
-    const normalizedStatus = normalizeMilestoneStatus(dto.newStatus);
-    if (normalizedStatus) {
-      dto.newStatus = normalizedStatus;
-    }
 
     return this.writeWithBackstop(
       RetryJobType.MILESTONE_UPDATE,

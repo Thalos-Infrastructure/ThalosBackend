@@ -113,8 +113,8 @@ export class ApproveMilestoneDto {
  * endpoint — see GF-4-BE / issue #142). This endpoint remains for backward compatibility
  * with existing TW-proxy callers but will be removed in a future release.
  *
- * Legacy TW values (e.g. "completed") are normalized to the canonical Thalos enum
- * before being forwarded to Trustless Work. See `normalizeMilestoneStatus()`.
+ * This is an opaque Trustless Work proxy payload. TW values are passed through
+ * unchanged; inbound webhook/reconciliation paths normalize them for Thalos.
  */
 export class ChangeMilestoneStatusDto {
   @IsString()
@@ -127,11 +127,11 @@ export class ChangeMilestoneStatusDto {
   newEvidence: string;
 
   /**
-   * Milestone status to set. Accepts canonical Thalos values
-   * (`pending`, `approved`, `released`, `rejected`) **and** legacy Trustless Work
-   * values (`completed` → mapped to `released`).
+   * Milestone status to set. Accepts canonical Thalos values and the legacy TW
+   * value `completed`, which must remain unchanged in the outbound TW request.
    */
   @IsString()
+  @IsIn(['pending', 'approved', 'released', 'rejected', 'completed'])
   newStatus: string;
 
   @IsString()

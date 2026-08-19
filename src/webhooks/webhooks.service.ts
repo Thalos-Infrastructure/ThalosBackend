@@ -265,7 +265,14 @@ export class WebhooksService implements OnModuleInit {
       // Normalize legacy TW milestone statuses (e.g. "completed" → "released")
       // so the local DB always uses the canonical Thalos enum.
       const normalized = normalizeMilestoneStatus(payload.milestone.status);
-      milestones[milestoneIndex].status = normalized ?? payload.milestone.status;
+      if (normalized) {
+        milestones[milestoneIndex].status = normalized;
+      } else {
+        this.logger.warn(
+          `Skipping unknown milestone status "${payload.milestone.status}" ` +
+            `for contractId="${payload.contractId}"`,
+        );
+      }
     }
     if (payload.milestone?.description) {
       milestones[milestoneIndex].description = payload.milestone.description;

@@ -6,6 +6,7 @@ import {
   TrustlessRelayError,
 } from '../../internal-trustless/escrow-write.helper';
 import type { ServiceType } from '../../internal-trustless/dto/escrow-write.dto';
+import { normalizeMilestoneStatus } from '../../common/milestone-status';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -140,8 +141,10 @@ export class MilestoneSyncService implements OnModuleInit {
     currentLocalStatus: string;
     twStatus: string;
   }): 'applied' | 'skipped' | 'conflict' {
-    if (params.currentLocalStatus === params.twStatus) return 'skipped';
-    if (this.detectConflict(params.currentLocalStatus, params.twStatus)) return 'conflict';
+    const twStatus = normalizeMilestoneStatus(params.twStatus);
+    if (!twStatus) return 'conflict';
+    if (params.currentLocalStatus === twStatus) return 'skipped';
+    if (this.detectConflict(params.currentLocalStatus, twStatus)) return 'conflict';
     return 'applied';
   }
 
