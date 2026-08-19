@@ -324,11 +324,7 @@ describe('WebhooksService.handleEvent — milestone updates', () => {
   it('escrow.milestone_updated: normalizes legacy TW status "completed" → "released"', async () => {
     const updateClientMock = milestoneUpdateClient();
     const svc = buildService({
-      getClientCalls: [
-        milestoneSelectClient(agreementData),
-        updateClientMock,
-        insertClient(),
-      ],
+      getClientCalls: [milestoneSelectClient(agreementData), updateClientMock, insertClient()],
     });
     const result = await runHandleEventAndProcess(svc, {
       event: 'escrow.milestone_updated',
@@ -348,11 +344,7 @@ describe('WebhooksService.handleEvent — milestone updates', () => {
   it('escrow.milestone_updated: does not persist an unknown TW status', async () => {
     const updateClientMock = milestoneUpdateClient();
     const svc = buildService({
-      getClientCalls: [
-        milestoneSelectClient(agreementData),
-        updateClientMock,
-        insertClient(),
-      ],
+      getClientCalls: [milestoneSelectClient(agreementData), updateClientMock, insertClient()],
     });
 
     await runHandleEventAndProcess(svc, {
