@@ -5,10 +5,13 @@ import type { CreateOpportunityDto } from './dto/opportunities.dto';
 
 const OWNER_USER = 'user-owner';
 const OTHER_USER = 'user-other';
+const PERSONAL_USER = 'user-personal';
 const OWNER_WALLET = 'G_OWNER';
 const OTHER_WALLET = 'G_OTHER';
+const PERSONAL_WALLET = 'G_PERSONAL';
 const OWNER_PROFILE = 'profile-owner';
 const OTHER_PROFILE = 'profile-other';
+const PERSONAL_PROFILE = 'profile-personal';
 
 function opportunity(overrides: Partial<Opportunity> = {}): Opportunity {
   return {
@@ -33,9 +36,15 @@ const createDto: CreateOpportunityDto = {
   engagement_type: 'fixed',
 };
 
+interface ProfileRow {
+  id: string;
+  wallet: string;
+  account_type: 'personal' | 'enterprise';
+}
+
 interface Store {
   users: Record<string, string>;
-  profiles: Record<string, string>;
+  profiles: Record<string, ProfileRow>;
   opportunities: Opportunity[];
 }
 
@@ -84,10 +93,14 @@ function makeClient(store: Store) {
         }
         if (table === 'profiles') {
           const wallet = state.eq.wallet_address as string | undefined;
-          const id = wallet
-            ? Object.entries(store.profiles).find(([, w]) => w === wallet)?.[0]
+          const profile = wallet
+            ? Object.values(store.profiles).find((p) => p.wallet === wallet)
             : undefined;
-          return { data: id ? { id } : null, error: null, count: null };
+          return {
+            data: profile ? { id: profile.id, account_type: profile.account_type } : null,
+            error: null,
+            count: null,
+          };
         }
 
         let rows = [...store.opportunities];
@@ -205,10 +218,24 @@ function buildService(opportunities: Opportunity[] = []) {
     users: {
       [OWNER_USER]: OWNER_WALLET,
       [OTHER_USER]: OTHER_WALLET,
+      [PERSONAL_USER]: PERSONAL_WALLET,
     },
     profiles: {
-      [OWNER_PROFILE]: OWNER_WALLET,
-      [OTHER_PROFILE]: OTHER_WALLET,
+      [OWNER_PROFILE]: {
+        id: OWNER_PROFILE,
+        wallet: OWNER_WALLET,
+        account_type: 'enterprise',
+      },
+      [OTHER_PROFILE]: {
+        id: OTHER_PROFILE,
+        wallet: OTHER_WALLET,
+        account_type: 'enterprise',
+      },
+      [PERSONAL_PROFILE]: {
+        id: PERSONAL_PROFILE,
+        wallet: PERSONAL_WALLET,
+        account_type: 'personal',
+      },
     },
     opportunities: [...opportunities],
   };
@@ -399,5 +426,56 @@ describe('isAllowedStatusTransition (via service)', () => {
     await expect(svc.update(OWNER_USER, 'opp-1', { status: 'closed' })).rejects.toBeInstanceOf(
       BadRequestException,
     );
+  });
+});
+
+describe('OpportunitiesService enterprise gate', () => {
+  it('rejects create from a personal profile with 403', async () => {
+    const { svc } = buildService();
+    await expect(svc.create(PERSONAL_USER, createDto)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects update from a personal profile with 403', async () => {
+    const { svc } = buildService([opportunity({ id: 'opp-1', project_id: PERSONAL_PROFILE })]);
+    await expect(
+      svc.update(PERSONAL_USER, 'opp-1', { title: 'Hijack title here' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects delete from a personal profile with 403', async () => {
+    const { svc } = buildService([opportunity({ id: 'opp-1', project_id: PERSONAL_PROFILE })]);
+    await expect(svc.remove(PERSONAL_USER, 'opp-1')).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects listMine from a personal profile with 403', async () => {
+    const { svc } = buildService();
+    await expect(svc.listMine(PERSONAL_USER)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('lets a personal profile discover and read open detail', async () => {
+    const open = opportunity({ id: 'opp-open' });
+    const { svc } = buildService([open]);
+    const discovered = await svc.discover({ page: 1, limit: 20 });
+    expect(discovered.opportunities.map((o) => o.id)).toEqual(['opp-open']);
+    const { opportunity: found } = await svc.getById(PERSONAL_USER, 'opp-open');
+    expect(found.id).toBe('opp-open');
+  });
+
+  it('returns 404 not 403 when a personal profile reads a closed opportunity', async () => {
+    const closed = opportunity({ id: 'opp-closed', status: 'closed' });
+    const { svc } = buildService([closed]);
+    await expect(svc.getById(PERSONAL_USER, 'opp-closed')).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('OpportunitiesService.listMine', () => {
+  it('returns all statuses for the owning Project', async () => {
+    const { svc } = buildService([
+      opportunity({ id: 'a', status: 'open' }),
+      opportunity({ id: 'b', status: 'filled', created_at: '2026-08-02T00:00:00Z' }),
+    ]);
+    const result = await svc.listMine(OWNER_USER);
+    expect(result.opportunities.map((o) => o.id).sort()).toEqual(['a', 'b']);
+    expect(result.error).toBeNull();
   });
 });
