@@ -35,12 +35,19 @@ export interface MergedPR {
 }
 
 /** Shape for an attached PR row from the database. */
-export interface AttachedPR extends MergedPR {
+export interface AttachedPR {
   id: string;
+  agreement_id: string;
   milestone_index: number;
+  repo: string;
+  pr_number: number;
+  title: string;
+  url: string;
+  merged_at: string;
   attached_by: string;
   created_at: string;
 }
+
 
 @Injectable()
 export class GitHubEvidenceService {
@@ -396,7 +403,10 @@ export class GitHubEvidenceService {
       .update(payload)
       .digest('base64url');
 
-    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    const bufSig = Buffer.from(signature);
+    const bufExp = Buffer.from(expected);
+
+    if (bufSig.length !== bufExp.length || !crypto.timingSafeEqual(bufSig, bufExp)) {
       throw new ForbiddenException('Invalid OAuth state signature');
     }
 
