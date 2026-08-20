@@ -20,6 +20,7 @@ import { RetryQueueModule } from './retry-queue/retry-queue.module';
 import { VerificationModule } from './verification/verification.module';
 import { KybModule } from './kyb/kyb.module';
 import { IdentityProvidersModule } from './identity-providers/identity-providers.module';
+import { OpportunitiesModule } from './opportunities/opportunities.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { IdentityProvidersModule } from './identity-providers/identity-providers
     VerificationModule,
     KybModule,
     IdentityProvidersModule,
+    OpportunitiesModule,
   ],
   controllers: [RootController],
 })
