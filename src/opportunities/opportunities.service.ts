@@ -17,7 +17,7 @@ export class OpportunitiesService {
   constructor(private readonly supabase: SupabaseService) {}
 
   async create(userId: string, dto: CreateOpportunityDto) {
-    const projectId = await this.requireCallerProfileId(userId);
+    const projectId = await this.requireProjectProfileId(userId);
     if (dto.project_id && dto.project_id !== projectId) {
       throw new ForbiddenException('project_id does not match the authenticated Project');
     }
@@ -60,7 +60,7 @@ export class OpportunitiesService {
   }
 
   async listMine(userId: string) {
-    const projectId = await this.requireCallerProfileId(userId);
+    const projectId = await this.requireProjectProfileId(userId);
     const { data, error } = await this.supabase
       .getClient()
       .from('opportunities')
@@ -279,14 +279,16 @@ export class OpportunitiesService {
 
   private async requireOwner(userId: string, id: string): Promise<Opportunity> {
     const opportunity = await this.load(id);
-    const projectId = await this.requireCallerProfileId(userId);
+    const projectId = await this.requireProjectProfileId(userId);
     if (opportunity.project_id !== projectId) {
       throw new ForbiddenException('Only the owning Project can modify this opportunity');
     }
     return opportunity;
   }
 
-  private async requireCallerProfileId(userId: string): Promise<string> {
+  private async resolveCallerProfile(
+    userId: string,
+  ): Promise<{ id: string; account_type: 'personal' | 'enterprise' }> {
     const wallet = await this.walletForUserId(userId);
     if (!wallet) {
       throw new ForbiddenException('No wallet on profile');
@@ -295,14 +297,30 @@ export class OpportunitiesService {
     const { data, error } = await this.supabase
       .getClient()
       .from('profiles')
-      .select('id')
+      .select('id, account_type')
       .eq('wallet_address', wallet)
       .maybeSingle();
 
     if (error || !data?.id) {
       throw new ForbiddenException('No Project profile for this user');
     }
-    return data.id as string;
+    return {
+      id: data.id as string,
+      account_type: data.account_type as 'personal' | 'enterprise',
+    };
+  }
+
+  private async requireCallerProfileId(userId: string): Promise<string> {
+    const profile = await this.resolveCallerProfile(userId);
+    return profile.id;
+  }
+
+  private async requireProjectProfileId(userId: string): Promise<string> {
+    const profile = await this.resolveCallerProfile(userId);
+    if (profile.account_type !== 'enterprise') {
+      throw new ForbiddenException('Only a Project can manage opportunities');
+    }
+    return profile.id;
   }
 
   private async walletForUserId(userId: string): Promise<string | null> {
