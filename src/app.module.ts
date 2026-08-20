@@ -22,6 +22,7 @@ import { VerificationModule } from './verification/verification.module';
 import { KybModule } from './kyb/kyb.module';
 import { KycModule } from './kyc/kyc.module';
 import { IdentityProvidersModule } from './identity-providers/identity-providers.module';
+import { OpportunitiesModule } from './opportunities/opportunities.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { IdentityProvidersModule } from './identity-providers/identity-providers
     KybModule,
     KycModule,
     IdentityProvidersModule,
+    OpportunitiesModule,
   ],
   controllers: [RootController],
 })
