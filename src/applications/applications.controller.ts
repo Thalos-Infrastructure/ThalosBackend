@@ -9,13 +9,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiParam,
-  ApiQuery,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUserCtx } from '../auth/current-user.decorator';
 import { ApplicationsService } from './applications.service';
@@ -57,10 +51,7 @@ export class ApplicationsController {
     required: true,
     description: 'UUID of the opportunity whose applicants to list',
   })
-  listApplicants(
-    @CurrentUser() user: AuthUserCtx,
-    @Query() query: ListApplicationsQueryDto,
-  ) {
+  listApplicants(@CurrentUser() user: AuthUserCtx, @Query() query: ListApplicationsQueryDto) {
     return this.applications.listApplicants(user.userId, query);
   }
 

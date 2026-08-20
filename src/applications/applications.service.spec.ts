@@ -23,7 +23,7 @@ interface Row {
 type Store = Record<string, Row[]>;
 
 function makeQueryBuilder(store: Store, table: string) {
-  let rows: Row[] = store[table] ? [...store[table]] : [];
+  const rows: Row[] = store[table] ? [...store[table]] : [];
   let pendingInsert: Row | null = null;
   let pendingUpdate: Partial<Row> | null = null;
   let isDelete = false;
@@ -70,9 +70,6 @@ function makeQueryBuilder(store: Store, table: string) {
       }
 
       if (pendingInsert) {
-        const existing = (store[table] ?? []).find((r) =>
-          eqFilters.every(({ key, value }) => r[key] === value),
-        );
         // Simulate unique-constraint violation
         if (
           table === 'applications' &&
@@ -141,11 +138,7 @@ const OPP_ID = 'opp-00000000-0000-0000-0000-000000000001';
 
 function makeStore(overrides: Partial<Store> = {}): Store {
   return {
-    auth_users: [
-      { id: OWNER_ID },
-      { id: BUILDER_ID },
-      { id: OTHER_BUILDER_ID },
-    ],
+    auth_users: [{ id: OWNER_ID }, { id: BUILDER_ID }, { id: OTHER_BUILDER_ID }],
     opportunities: [{ id: OPP_ID, owner_id: OWNER_ID }],
     applications: [],
     ...overrides,
@@ -209,27 +202,27 @@ describe('ApplicationsService', () => {
       });
       const svc = buildService(store);
 
-      await expect(
-        svc.apply(BUILDER_ID, { opportunity_id: OPP_ID }),
-      ).rejects.toThrow(ConflictException);
+      await expect(svc.apply(BUILDER_ID, { opportunity_id: OPP_ID })).rejects.toThrow(
+        ConflictException,
+      );
     });
 
     it('throws NotFoundException when opportunity does not exist', async () => {
       const store = makeStore();
       const svc = buildService(store);
 
-      await expect(
-        svc.apply(BUILDER_ID, { opportunity_id: 'non-existent-opp' }),
-      ).rejects.toThrow(NotFoundException);
+      await expect(svc.apply(BUILDER_ID, { opportunity_id: 'non-existent-opp' })).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws ForbiddenException when user is not found', async () => {
       const store = makeStore({ auth_users: [] }); // no users
       const svc = buildService(store);
 
-      await expect(
-        svc.apply('ghost-user', { opportunity_id: OPP_ID }),
-      ).rejects.toThrow(ForbiddenException);
+      await expect(svc.apply('ghost-user', { opportunity_id: OPP_ID })).rejects.toThrow(
+        ForbiddenException,
+      );
     });
   });
 
@@ -272,9 +265,9 @@ describe('ApplicationsService', () => {
       const store = makeStore({ applications: [existingApplication] });
       const svc = buildService(store);
 
-      await expect(
-        svc.listApplicants(BUILDER_ID, { opportunity_id: OPP_ID }),
-      ).rejects.toThrow(ForbiddenException);
+      await expect(svc.listApplicants(BUILDER_ID, { opportunity_id: OPP_ID })).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('throws NotFoundException when opportunity does not exist', async () => {

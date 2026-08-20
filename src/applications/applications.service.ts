@@ -107,9 +107,7 @@ export class ApplicationsService {
     if (error) {
       // Postgres unique-constraint violation: duplicate application.
       if (error.code === '23505') {
-        throw new ConflictException(
-          'You have already applied to this opportunity',
-        );
+        throw new ConflictException('You have already applied to this opportunity');
       }
       return { application: null, error: error.message };
     }
