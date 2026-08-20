@@ -46,6 +46,7 @@ interface Store {
   users: Record<string, string>;
   profiles: Record<string, ProfileRow>;
   opportunities: Opportunity[];
+  failTables?: Partial<Record<string, string>>;
 }
 
 interface FilterState {
@@ -82,6 +83,13 @@ function makeClient(store: Store) {
 
       const builder: Record<string, unknown> = {};
       const applySelect = () => {
+        if (store.failTables?.[table]) {
+          return {
+            data: null,
+            error: { message: store.failTables[table] },
+            count: null,
+          };
+        }
         if (table === 'auth_users') {
           const id = state.eq.id as string | undefined;
           const wallet = id ? store.users[id] : undefined;
@@ -464,7 +472,9 @@ describe('OpportunitiesService enterprise gate', () => {
   it('returns 404 not 403 when a personal profile reads a closed opportunity', async () => {
     const closed = opportunity({ id: 'opp-closed', status: 'closed' });
     const { svc } = buildService([closed]);
-    await expect(svc.getById(PERSONAL_USER, 'opp-closed')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(svc.getById(PERSONAL_USER, 'opp-closed')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });
 
@@ -477,5 +487,19 @@ describe('OpportunitiesService.listMine', () => {
     const result = await svc.listMine(OWNER_USER);
     expect(result.opportunities.map((o) => o.id).sort()).toEqual(['a', 'b']);
     expect(result.error).toBeNull();
+  });
+
+  it('throws when listMine query fails', async () => {
+    const { svc, store } = buildService();
+    store.failTables = { opportunities: 'boom' };
+    await expect(svc.listMine(OWNER_USER)).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('OpportunitiesService discover query failures', () => {
+  it('throws when discover query fails', async () => {
+    const { svc, store } = buildService();
+    store.failTables = { opportunities: 'boom' };
+    await expect(svc.discover({ page: 1, limit: 20 })).rejects.toBeInstanceOf(BadRequestException);
   });
 });

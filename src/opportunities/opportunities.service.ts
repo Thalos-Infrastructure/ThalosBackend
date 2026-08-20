@@ -69,7 +69,19 @@ export class OpportunitiesService {
       .order('created_at', { ascending: false });
 
     if (error) {
-      return { opportunities: [] as Opportunity[], error: error.message };
+      throw new BadRequestException({
+        success: false,
+        error: {
+          code: 'OPPORTUNITY_LIST_FAILED',
+          details: [
+            {
+              field: 'query',
+              code: 'OPPORTUNITY_LIST_FAILED',
+              message: error.message,
+            },
+          ],
+        },
+      });
     }
     return { opportunities: (data as Opportunity[]) ?? [], error: null };
   }
@@ -130,7 +142,19 @@ export class OpportunitiesService {
       .range(from, to);
 
     if (error) {
-      return { opportunities: [] as Opportunity[], page, limit, total: 0, error: error.message };
+      throw new BadRequestException({
+        success: false,
+        error: {
+          code: 'OPPORTUNITY_DISCOVER_FAILED',
+          details: [
+            {
+              field: 'query',
+              code: 'OPPORTUNITY_DISCOVER_FAILED',
+              message: error.message,
+            },
+          ],
+        },
+      });
     }
 
     return {
