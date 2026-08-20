@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsIn } from 'class-validator';
+import { IsBoolean, IsString, IsNotEmpty, IsOptional, IsIn, Matches } from 'class-validator';
 
 export class GetOrCreateProfileDto {
   @IsString()
@@ -28,6 +28,17 @@ export class UpdateProfileDto {
   @IsIn(['personal', 'enterprise'])
   @IsOptional()
   account_type?: 'personal' | 'enterprise';
+
+  @IsString()
+  @IsOptional()
+  @Matches(/^[a-z0-9][a-z0-9_-]{1,30}$/, {
+    message: 'handle must be 2-31 chars: lowercase alphanumeric, hyphens, underscores',
+  })
+  handle?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  show_earnings?: boolean;
 }
 
 export class SetUserRoleDto {

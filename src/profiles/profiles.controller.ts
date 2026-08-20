@@ -1,15 +1,19 @@
 import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUserCtx } from '../auth/current-user.decorator';
 import { ProfilesService } from './profiles.service';
+import { ReputationService, ReputationPayload } from './reputation.service';
 import { GetOrCreateProfileDto, UpdateProfileDto, SetUserRoleDto } from './dto/profiles.dto';
 
 @ApiTags('profiles')
 @ApiBearerAuth('bearer')
 @Controller('profiles')
 export class ProfilesController {
-  constructor(private readonly profiles: ProfilesService) {}
+  constructor(
+    private readonly profiles: ProfilesService,
+    private readonly reputation: ReputationService,
+  ) {}
 
   @Post()
   @UseGuards(JwtAuthGuard)
@@ -30,6 +34,30 @@ export class ProfilesController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.profiles.update(user.userId, wallet, dto);
+  }
+
+  @Get('handle/:handle/reputation')
+  @ApiOperation({
+    summary: 'Public reputation summary for a builder by handle',
+    description:
+      'Returns aggregated reputation data (completed agreements, released milestones, ' +
+      'PR-backed milestones, GitHub verification status). No auth required. ' +
+      'Earnings (total_released_usdc) are only visible when the builder has opted in.',
+  })
+  getPublicReputation(@Param('handle') handle: string): Promise<ReputationPayload> {
+    return this.reputation.getPublicReputation(handle);
+  }
+
+  @Get('me/reputation')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary: 'Authenticated builder own reputation summary',
+    description:
+      'Returns the authenticated builder full reputation data including earnings. ' +
+      'Mirrors the public /handle/:handle/reputation endpoint but always includes total_released_usdc.',
+  })
+  getMyReputation(@CurrentUser() user: AuthUserCtx): Promise<ReputationPayload> {
+    return this.reputation.getMyReputation(user.userId);
   }
 
   @Get('dispute-resolvers')

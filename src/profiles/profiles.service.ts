@@ -13,6 +13,9 @@ export interface Profile {
   avatar_url: string | null;
   account_type: AccountType;
   role: ProfileRole;
+  handle: string | null;
+  show_earnings: boolean;
+  github_verified: boolean | null;
   created_at: string;
   updated_at: string;
 }
