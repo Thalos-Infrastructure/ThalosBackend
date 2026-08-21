@@ -1,5 +1,11 @@
 # Thalos Backend — AGENTS.md
 
+> **Partly out of date — see [CLAUDE.md](CLAUDE.md) first.** This file still says the
+> project has no tests, no linter and no `.env.example`; all three are wrong (33 Jest
+> suites, ESLint + Prettier wired into CI, and `.env.example` is the canonical env list).
+> It also predates the Node 22 requirement and the `@Public()` escrow reads.
+
+
 ## Quick start
 
 ```bash

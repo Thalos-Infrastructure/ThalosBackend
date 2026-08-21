@@ -1,4 +1,5 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -16,7 +17,13 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
  */
 @Injectable()
 export class JwtOrInternalSecretGuard implements CanActivate {
-  private readonly jwtGuard = new JwtAuthGuard();
+  private readonly jwtGuard: JwtAuthGuard;
+
+  constructor(reflector: Reflector) {
+    // JwtAuthGuard reads @Public() metadata off the reflector, so it can no
+    // longer be constructed bare. No route behind this guard is @Public().
+    this.jwtGuard = new JwtAuthGuard(reflector);
+  }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<Request & { isInternalService?: boolean }>();

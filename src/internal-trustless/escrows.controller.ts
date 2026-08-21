@@ -10,9 +10,12 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
+import { StrKey } from '@stellar/stellar-sdk';
 import { formatUpstreamError } from './escrow-write.helper';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Public } from '../common/decorators/public.decorator';
 import { RetryQueueService } from '../retry-queue/retry-queue.service';
 import { RetryJobType } from '../retry-queue/retry-queue.types';
 import { relayToTrustless } from './trustless-relay.helper';
@@ -72,6 +75,16 @@ export class EscrowsController implements OnModuleInit {
     }
   }
 
+  /**
+   * `@Public()`: escrows are public on-chain data and this handler never bound the
+   * address to the JWT user anyway — any authenticated caller could already read any
+   * address. Keeping it behind auth only forced the dashboard to mint a JWT (and pop a
+   * wallet-signature prompt) to read public data. Writes stay authenticated.
+   * Throttled because it still spends our server-side Trustless Work API key.
+   */
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Get('by-signer/:address')
   async getEscrowsBySigner(
     @Param('address') address: string,
@@ -79,6 +92,7 @@ export class EscrowsController implements OnModuleInit {
     @Query('pageSize') pageSize?: string,
     @Query('validateOnChain') validateOnChain?: string,
   ) {
+    EscrowsController.assertStellarAddress(address);
     // Trustless Work's helper expects `signer` (NOT `address`) plus pagination
     // flags; sending `address` makes TW reject with "property address should not
     // exist" (400), which used to force the frontend to fall back to calling TW
@@ -93,6 +107,16 @@ export class EscrowsController implements OnModuleInit {
     return result.data;
   }
 
+  /**
+   * The `@Public()` reads take their address from an unauthenticated caller, so reject
+   * anything that isn't a Stellar public key before spending a Trustless Work call.
+   */
+  private static assertStellarAddress(address: string): void {
+    if (!address || !StrKey.isValidEd25519PublicKey(address)) {
+      throw new BadRequestException('`address` no es una clave pública Stellar válida');
+    }
+  }
+
   // Trustless Work expects role values in camelCase (e.g. `serviceProvider`).
   // The frontend/app uses snake_case, so normalize here — the backend owns the TW
   // contract. Sending `service_provider` queries a non-existent `roles.service_provider`
@@ -103,6 +127,10 @@ export class EscrowsController implements OnModuleInit {
     dispute_resolver: 'disputeResolver',
   };
 
+  /** Public for the same reason as `by-signer` above. */
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Get('by-role')
   async getEscrowsByRole(
     @Query('address') address: string,
@@ -110,6 +138,7 @@ export class EscrowsController implements OnModuleInit {
     @Query('status') status?: string,
     @Query('type') type?: 'single-release' | 'multi-release',
   ) {
+    EscrowsController.assertStellarAddress(address);
     // TW's helper filters a role by `roleAddress` (NOT `address`).
     const query: Record<string, string | number | boolean> = { roleAddress: address };
     if (role) query.role = EscrowsController.TW_ROLE_MAP[role] ?? role;
