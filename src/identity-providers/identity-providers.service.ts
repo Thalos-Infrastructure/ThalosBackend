@@ -19,7 +19,7 @@ export class IdentityProvidersService {
 
   async processWebhook(payload: unknown) {
     const result = await this.provider.processWebhook(payload);
-    
+
     // Emit event so the KycModule can automatically update the verification status
     this.eventEmitter.emit('kyc.webhook.processed', result);
 

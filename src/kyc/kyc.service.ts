@@ -1,31 +1,18 @@
-import {
-  Injectable,
-  BadRequestException,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, BadRequestException, Inject } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { SupabaseService } from '../supabase/supabase.service';
-import { IdentityProvidersService } from '../identity-providers/identity-providers.service';
+import {
+  KYC_PROVIDER,
+  IKycProvider,
+} from '../identity-providers/interfaces/kyc-provider.interface';
+import { VerificationService } from '../verification/verification.service';
+import { VerificationStatusResponse } from '../verification/verification.types';
 import { CreateKycSessionDto } from './dto/kyc.dto';
-
-export type KycStatus = 'pending' | 'in_review' | 'verified' | 'rejected' | 'expired';
-
-export interface KycVerification {
-  id: string;
-  user_id: string;
-  status: KycStatus;
-  provider: string;
-  provider_session_id: string;
-  rejection_reason: string | null;
-  verified_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
 
 interface WebhookResult {
   providerVerificationId: string;
   result: {
-    status: KycStatus;
+    status: string;
     verifiedAt: string | null;
   };
 }
@@ -34,154 +21,129 @@ interface WebhookResult {
 export class KycService {
   constructor(
     private readonly supabase: SupabaseService,
-    private readonly identityProvidersService: IdentityProvidersService,
+    @Inject(KYC_PROVIDER) private readonly provider: IKycProvider,
+    private readonly verificationService: VerificationService,
   ) {}
-
-  private async findByUserId(userId: string): Promise<KycVerification | null> {
-    const { data, error } = await this.supabase
-      .getClient()
-      .from('kyc_verifications')
-      .select('*')
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (error) {
-      throw new BadRequestException(error.message);
-    }
-    return (data as KycVerification) ?? null;
-  }
 
   async createSession(
     userId: string,
     dto: CreateKycSessionDto,
-  ): Promise<{ verification: KycVerification; sessionUrl?: string }> {
-    const existing = await this.findByUserId(userId);
+  ): Promise<{ verification: VerificationStatusResponse; sessionUrl?: string }> {
+    const status = await this.verificationService.getUserVerification(userId, {
+      isInternalService: true,
+    });
 
-    if (existing) {
-      if (existing.status === 'pending' || existing.status === 'in_review') {
-        // Already has a live session in flight
-        return { verification: existing };
-      }
-
-      if (existing.status === 'verified') {
-        return { verification: existing };
-      }
-
-      // If rejected or expired, we create a new session
-      const session = await this.identityProvidersService.createSession(userId, dto.metadata);
-
-      // IdentityProvidersService gets the provider implicitly via KYC_PROVIDER,
-      // but IdentityProvidersService doesn't expose `provider.name` directly.
-      // We will look up the provider config name. Actually, we can fetch the provider name
-      // by relying on the environment variable, but it's cleaner to ask IdentityProvidersService
-      // Unfortunately IdentityProvidersService doesn't expose it. Let's just use 'default' for now
-      // or we can read the env variable inside IdentityProvidersService.
-      // We can get the provider name from process.env.IDENTITY_PROVIDER ?? 'sumsub'.
-      const providerName = process.env.IDENTITY_PROVIDER ?? 'sumsub';
-
-      const { data, error } = await this.supabase
-        .getClient()
-        .from('kyc_verifications')
-        .update({
-          status: 'pending',
-          provider: providerName,
-          provider_session_id: session.providerVerificationId,
-          rejection_reason: null,
-          verified_at: null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', userId)
-        .select()
-        .single();
-
-      if (error) {
-        throw new BadRequestException(error.message);
-      }
-      return { verification: data as KycVerification, sessionUrl: session.sessionUrl };
+    if (status.status === 'pending' || status.status === 'in_review') {
+      return { verification: status };
     }
 
-    const session = await this.identityProvidersService.createSession(userId, dto.metadata);
-    const providerName = process.env.IDENTITY_PROVIDER ?? 'sumsub';
+    if (status.status === 'verified') {
+      return { verification: status };
+    }
 
-    const { data, error } = await this.supabase
-      .getClient()
-      .from('kyc_verifications')
-      .insert({
-        user_id: userId,
+    const session = await this.provider.createSession({ userId, metadata: dto.metadata });
+
+    const metadata = {
+      ...(dto.metadata || {}),
+      ...(session.metadata || {}),
+      ...(session.sessionUrl ? { sessionUrl: session.sessionUrl } : {}),
+    };
+
+    const { error } = await this.supabase.getClient().from('verifications').upsert(
+      {
+        subject_type: 'user',
+        subject_id: userId,
+        provider: this.provider.name,
+        provider_reference: session.providerVerificationId,
         status: 'pending',
-        provider: providerName,
-        provider_session_id: session.providerVerificationId,
+        metadata,
         verified_at: null,
-      })
-      .select()
-      .single();
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'subject_type,subject_id,provider' },
+    );
 
     if (error) {
-      if ((error as { code?: string }).code === '23505') {
-        const raced = await this.findByUserId(userId);
-        if (raced) {
-          return { verification: raced };
-        }
-      }
       throw new BadRequestException(error.message);
     }
 
-    return { verification: data as KycVerification, sessionUrl: session.sessionUrl };
+    const updatedStatus = await this.verificationService.getUserVerification(userId, {
+      isInternalService: true,
+    });
+    return { verification: updatedStatus, sessionUrl: session.sessionUrl };
   }
 
-  async getStatus(userId: string): Promise<{ verification: KycVerification }> {
-    const verification = await this.findByUserId(userId);
-    if (!verification) {
-      throw new NotFoundException('No KYC verification found for this user');
-    }
+  async getStatus(userId: string): Promise<{ verification: VerificationStatusResponse }> {
+    const status = await this.verificationService.getUserVerification(userId, {
+      isInternalService: true,
+    });
 
-    // Sync status with provider if pending/in_review
-    if (verification.status === 'pending' || verification.status === 'in_review') {
-      const providerStatus = await this.identityProvidersService.getStatus(
-        verification.provider_session_id,
-      );
+    // Optional: we could do JIT sync here if it's pending/in_review, but typically we rely on webhooks.
+    // In the old code, we checked the provider status if it was pending/in_review.
+    // If the reviewer said "thin-wrap the Verification service", maybe we can just return the status.
+    // Let's implement JIT sync for the current provider if the aggregate status is pending.
 
-      if (providerStatus.status !== verification.status) {
-        const { data, error } = await this.supabase
-          .getClient()
-          .from('kyc_verifications')
-          .update({
-            status: providerStatus.status,
-            verified_at:
-              providerStatus.status === 'verified'
-                ? (providerStatus.verifiedAt ?? new Date().toISOString())
-                : null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('user_id', userId)
-          .select()
-          .single();
+    if (status.status === 'pending' || status.status === 'in_review') {
+      // Find the specific pending record for this provider to sync
+      const { data } = await this.supabase
+        .getClient()
+        .from('verifications')
+        .select('*')
+        .eq('subject_type', 'user')
+        .eq('subject_id', userId)
+        .eq('provider', this.provider.name)
+        .maybeSingle();
 
-        if (error) {
-          throw new BadRequestException(error.message);
+      if (
+        data &&
+        data.provider_reference &&
+        (data.status === 'pending' || data.status === 'in_review')
+      ) {
+        const providerStatus = await this.provider.getStatus(data.provider_reference);
+
+        if (String(providerStatus.status) !== String(data.status)) {
+          await this.supabase
+            .getClient()
+            .from('verifications')
+            .update({
+              status: providerStatus.status,
+              verified_at:
+                String(providerStatus.status) === 'verified'
+                  ? (providerStatus.verifiedAt ?? new Date().toISOString())
+                  : null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', data.id);
+
+          const updatedStatus = await this.verificationService.getUserVerification(userId, {
+            isInternalService: true,
+          });
+          return { verification: updatedStatus };
         }
-        return { verification: data as KycVerification };
       }
     }
 
-    return { verification };
+    return { verification: status };
   }
 
   @OnEvent('kyc.webhook.processed')
   async handleWebhookProcessed(payload: WebhookResult) {
     const { providerVerificationId, result } = payload;
-    
+
     const { data, error } = await this.supabase
       .getClient()
-      .from('kyc_verifications')
+      .from('verifications')
       .update({
         status: result.status,
-        verified_at: result.status === 'verified' ? (result.verifiedAt ?? new Date().toISOString()) : null,
+        verified_at:
+          String(result.status) === 'verified'
+            ? (result.verifiedAt ?? new Date().toISOString())
+            : null,
         updated_at: new Date().toISOString(),
       })
-      .eq('provider_session_id', providerVerificationId)
+      .eq('provider_reference', providerVerificationId)
       .select();
-      
+
     if (error) {
       console.error(`Failed to update KYC status from webhook: ${error.message}`);
     } else if (!data || data.length === 0) {
