@@ -272,10 +272,35 @@ export class WalletsService {
       // change it — a row saying 'accesly' with any other provider would lie.
       authProvider = 'accesly';
       pollarUserId = null;
+    } else if (dto.auth_provider === 'pollar') {
+      // A wallet the user brought, but authenticated through Pollar (#108).
+      // It cannot produce a SEP-0043 signature here — the browser never held
+      // the key, Pollar drove the wallet — but ownership was already proven:
+      // Pollar runs SEP-10 against the wallet, and the app JWT is minted only
+      // after that, writing the address onto auth_users.wallet_public_key.
+      // Same shape of proof the accesly branch accepts, so the same treatment.
+      if (!dto.pollar_user_id) {
+        throw new BadRequestException("auth_provider 'pollar' requires pollar_user_id");
+      }
+
+      const { data: authUser } = await this.supabase
+        .getClient()
+        .from('auth_users')
+        .select('wallet_public_key')
+        .eq('id', userId)
+        .maybeSingle();
+      if (authUser?.wallet_public_key !== dto.wallet_address) {
+        throw new ForbiddenException('Pollar wallet does not match the authenticated user');
+      }
+
+      isVerified = true;
+      verifiedAt = new Date().toISOString();
+      authProvider = 'pollar';
+      pollarUserId = dto.pollar_user_id;
     } else {
       if (dto.auth_provider || dto.pollar_user_id) {
         throw new BadRequestException(
-          'auth_provider and pollar_user_id are only valid for provisioned (custodial, accesly) wallets',
+          'auth_provider and pollar_user_id are only valid for wallets a login provisioned or authenticated',
         );
       }
 

@@ -85,6 +85,56 @@ function acceslyDto(overrides: Partial<LinkWalletDto> = {}): LinkWalletDto {
   };
 }
 
+function pollarExternalDto(overrides: Partial<LinkWalletDto> = {}): LinkWalletDto {
+  return {
+    wallet_address: G_ADDRESS,
+    // A wallet the user brought: its own type, not 'custodial'.
+    wallet_type: 'freighter',
+    auth_provider: 'pollar',
+    pollar_user_id: 'cms7zi5yd00930ilc8vx3nf4u',
+    ...overrides,
+  };
+}
+
+describe('WalletsService.linkWallet — wallet authenticated through Pollar (#108)', () => {
+  it("accepts Pollar's proof instead of a SEP-0043 signature", async () => {
+    const state: MockState = { authUserWallet: G_ADDRESS, inserts: [], updates: [] };
+    const service = makeService(state);
+
+    const { wallet, error } = await service.linkWallet(USER_ID, pollarExternalDto());
+
+    expect(error).toBeNull();
+    expect(wallet).toMatchObject({
+      wallet_address: G_ADDRESS,
+      wallet_type: 'freighter',
+      auth_provider: 'pollar',
+      pollar_user_id: 'cms7zi5yd00930ilc8vx3nf4u',
+      is_verified: true,
+    });
+  });
+
+  it('refuses a wallet the authenticated user did not log in with', async () => {
+    // The proof IS auth_users.wallet_public_key, written by the login route
+    // after Pollar's SEP-10. A mismatch means the caller is claiming someone
+    // else's address, which is exactly what the signature would have caught.
+    const state: MockState = { authUserWallet: 'GOTHERADDRESS', inserts: [], updates: [] };
+    const service = makeService(state);
+
+    await expect(service.linkWallet(USER_ID, pollarExternalDto())).rejects.toThrow(
+      /does not match the authenticated user/,
+    );
+  });
+
+  it('refuses to record a Pollar provider without the Pollar user id', async () => {
+    const state: MockState = { authUserWallet: G_ADDRESS, inserts: [], updates: [] };
+    const service = makeService(state);
+
+    await expect(
+      service.linkWallet(USER_ID, pollarExternalDto({ pollar_user_id: undefined })),
+    ).rejects.toThrow(/requires pollar_user_id/);
+  });
+});
+
 describe('WalletsService.linkWallet — accesly identity (#109)', () => {
   it('persists auth_provider + c_address and marks the wallet verified', async () => {
     const state: MockState = { authUserWallet: G_ADDRESS, inserts: [], updates: [] };
