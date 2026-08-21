@@ -1,3 +1,4 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test, TestingModule } from '@nestjs/testing';
 import { IdentityProvidersService } from './identity-providers.service';
 import { IdentityProvidersController } from './identity-providers.controller';
@@ -48,6 +49,10 @@ describe('IdentityProvidersService', () => {
         {
           provide: KYC_PROVIDER,
           useValue: mockProvider,
+        },
+        {
+          provide: EventEmitter2,
+          useValue: { emit: jest.fn() },
         },
       ],
     }).compile();
