@@ -1,64 +1,90 @@
-# ThalosBackend — CLAUDE.md
+# Trustless Work integration — CLAUDE.md
 
-NestJS API for Thalos. Owns Supabase persistence (agreements, profiles, wallets), a
-secure server-side **relay to the Trustless Work (TW) escrow API**, notifications
-(Resend), and TW webhooks. HTTP prefix `/v1`; Swagger at `/v1/docs`.
+This module is the **only** place that may hold the Trustless Work (TW) API key. Everything
+the browser needs from TW goes through here.
 
-## Runtime & commands
+Authoritative reference: the live OpenAPI spec, not the prose docs.
+`https://dev.api.trustlesswork.com/docs-json` (mainnet: `https://api.trustlesswork.com/docs-json`).
+The narrative docs at docs.trustlesswork.com omit most endpoint paths.
 
-- **Node 22 required** (NOT Node 20). `@supabase/supabase-js` (realtime) needs native
-  `WebSocket`, absent in Node 20 → the app crashes on boot with
-  "Node.js 20 detected without native WebSocket support". The repo `.nvmrc` says `20`
-  but is **stale**; `package.json` engines is `>=20`. Node 22 lives at
-  `C:\Users\leandro.masotti\AppData\Local\nvm\v22.23.1` (prepend to PATH; the global
-  default is still Node 20).
-- Package manager: **pnpm** (`packageManager: pnpm@10.11.0`).
-- Install: `pnpm install`
-- Dev: `pnpm start:dev` → http://localhost:3001 (watch mode)
-- Test: `pnpm test` · integration: `pnpm test:integration`
-- Lint: `pnpm lint` (eslint --fix) · Build: `pnpm build`
+## The contract with TW
 
-## Environment
+- Auth is the **`x-api-key` header** (matches the spec's `securitySchemes`).
+- Base URLs: `https://dev.api.trustlesswork.com` (testnet) / `https://api.trustlesswork.com`.
+- **Every write returns an unsigned XDR.** Nothing happens on-chain until the correct
+  role's wallet signs it and it is submitted through `POST /helper/send-transaction`.
+  This is why our write endpoints can authenticate loosely: an unsigned XDR is inert.
+- TW's naming is inconsistent and it rejects unknown properties, so parameter names matter:
+  - `get-escrows-by-signer` wants **`signer`**, not `address` (sending `address` returns a
+    400 `property address should not exist`).
+  - `get-escrows-by-role` filters on **`roleAddress`**, not `address`.
+  - Roles are **camelCase** upstream (`serviceProvider`), snake_case in our app.
+    `EscrowsController.TW_ROLE_MAP` translates; sending `service_provider` makes TW query a
+    non-existent field and answer a misleading 500 about a missing index.
+- Dispute is split by escrow type: single-release disputes the **whole escrow**
+  (`dispute-escrow`, no milestone), multi-release disputes **one milestone**
+  (`dispute-milestone`).
 
-Copy `.env.example` → `.env.local` (values in the example are working dev secrets).
-Key vars: `JWT_SECRET` (HS256; **must be identical to the frontend's**),
-`SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`, `TRUSTLESSWORK_API_URL` +
-`TRUSTLESSWORK_API_KEY` (server-only), `THALOS_INTERNAL_SECRET` (must match frontend),
-`RESEND_API_KEY`, `PORT` (3001), `THALOS_CORS_ORIGIN` (http://localhost:3000).
-Supabase project ref: `cpkjclwvgnxgadiaoaei`.
+## Endpoint coverage
 
-## Architecture
+| TW endpoint | Backend relay | Notes |
+|---|---|---|
+| `POST /deployer/{single,multi}-release` | ✅ | `buildCreateEscrowRequest` |
+| `POST /escrow/{type}/fund-escrow` | ✅ | |
+| `POST /escrow/single-release/release-funds` | ✅ | |
+| `POST /escrow/multi-release/release-milestone-funds` | ✅ | |
+| `POST /escrow/{type}/approve-milestone` | ✅ | |
+| `POST /escrow/{type}/change-milestone-status` | ✅ | |
+| `POST /escrow/single-release/dispute-escrow` | ✅ | |
+| `POST /escrow/multi-release/dispute-milestone` | ✅ | |
+| `GET /helper/get-escrows-by-signer` | ✅ | `@Public()` |
+| `GET /helper/get-escrows-by-role` | ✅ | `@Public()` |
+| `POST /helper/send-transaction` | ✅ | |
+| `POST /escrow/single-release/resolve-dispute` | ❌ | see below |
+| `POST /escrow/multi-release/resolve-milestone-dispute` | ❌ | see below |
+| `POST /escrow/{type}/extend-ttl` | ❌ | see below |
+| `PUT /escrow/{type}/update-escrow` | ❌ | |
+| `POST /escrow/multi-release/withdraw-remaining-funds` | ❌ | |
+| `GET /helper/get-escrow-by-contract-ids` | ❌ | |
+| `GET /helper/get-multiple-escrow-balance` | ❌ | balances are read from TW list responses |
 
-- **Auth (`src/auth/`)** — the backend only *validates* JWTs; it never signs them
-  (token signing is the frontend's responsibility — see `auth.module.ts`). `JwtStrategy`
-  verifies HS256 with `JWT_SECRET`; payload is `{ sub, email? }`; `validate()` returns
-  `req.user = { userId: sub, email }`. Use `@UseGuards(JwtAuthGuard)` + `@CurrentUser()`.
-- **Trustless Work relay (`src/internal-trustless/`)** — `relayToTrustless(method, path, query?, body?)`
-  in `trustless-relay.helper.ts` forwards to `TRUSTLESSWORK_API_URL` with the server-side
-  `x-api-key` header. Paths are allow-listed (`deployer/`, `escrow/`, `helper/`).
-  `escrows.controller.ts` exposes the escrow endpoints (class is `@UseGuards(JwtAuthGuard)`).
-  - ⚠️ **TW query param names matter** (confirmed against https://api.trustlesswork.com/docs):
-    `helper/get-escrows-by-signer` takes **`signer`** (rejects `role`/`roleAddress`);
-    `helper/get-escrows-by-role` takes **`roleAddress` + `role`** (rejects `signer`).
-    Sending `address` to either → TW 400 "property address should not exist". Also valid:
-    `page`, `pageSize` (TW default 8), `validateOnChain`, `status`, `type`.
-  - ⚠️ **TW `role` values are camelCase** (`serviceProvider`, `releaseSigner`, `disputeResolver`).
-    The controller normalizes snake_case → camelCase; sending `service_provider` makes TW return a
-    misleading `500 "query requires an index"` (it queries a non-existent `roles.service_provider`).
-  - Read endpoints (`by-signer`, `by-role`) require *any* valid JWT but ignore identity.
-    Write endpoints (`create`, `fund`, `approve-milestone`, …) call
-    `assertSignerWallet(user.userId, dto.signer)` → looks up `auth_users.wallet_public_key`
-    by `id = userId` and requires it to equal the signer.
-- **Supabase (`src/supabase/`)** — `SupabaseService.getClient()` uses the service-role key.
-  Tables: `auth_users` (`id` = JWT `sub`, has `wallet_public_key`), `profiles` (keyed by
-  `wallet_address`, has `role`/`account_type`), `user_wallets` (linked wallets).
-  Note `auth_users.id ≠ profiles.id`; they join via wallet address.
-- **Wallet signature verification (`src/wallets/helpers/stellar-verification.helper.ts`)** —
-  `verifyStellarSignature`, `parseAndVerifyChallenge`, `generateVerificationChallenge`
-  (stateless HMAC proof + 5-min TTL; no nonce store). Used for wallet linking/verification.
+### Two gaps worth knowing before you touch disputes or long-lived escrows
 
-## Conventions
+**Dispute resolution never reaches the chain.** `src/disputes/` resolves a dispute by
+updating a Supabase row and emitting an event. It never calls
+`resolve-dispute` / `resolve-milestone-dispute`. The app therefore shows a dispute as
+resolved while the on-chain escrow is still disputed and the funds stay locked. Closing
+this means building the unsigned XDR here, having the dispute resolver's wallet sign it,
+and only then writing `status = resolved`.
 
-- No cache/Redis; transient tokens use the stateless HMAC-proof pattern.
-- `@nestjs/jwt` is a dependency but unused (no signing here). `jsonwebtoken` is test-only.
-- Global `ValidationPipe` with `whitelist` + `forbidNonWhitelisted` + `transform`.
+**Nothing extends the contract TTL.** Soroban archives contract state whose TTL lapses.
+TW exposes `extend-ttl` for exactly this and we never call it, so an escrow that sits
+unused long enough can become unreachable. There is no scheduled job for it either.
+
+## Why the two reads are `@Public()`
+
+They never bound the address to the JWT user — any authenticated caller could already read
+any address — and escrow data is public on-chain. Keeping them guarded only forced the
+dashboard to mint an app JWT, which meant a wallet-signature popup before it could list
+anything. What protects them now:
+
+- `ThrottlerGuard` at 30 req/min per IP (`@Throttle` on each handler)
+- `StrKey.isValidEd25519PublicKey` rejects anything that is not a Stellar public key
+- `THALOS_CORS_ORIGIN` restricts browsers (but not non-browser clients)
+
+They still spend our API key, so treat the throttle as a quota guard and lower it if usage
+grows. **Never mark a write `@Public()`.**
+
+## Failure handling
+
+`relayWrite` distinguishes upstream 4xx from 5xx: a 4xx is rethrown unchanged (retrying a
+rejected request only burns quota), a 5xx is enqueued in the retry queue with an
+idempotency key and then rethrown. `formatUpstreamError` unwraps TW's error body so the
+client sees the real reason instead of a bare status.
+
+## Known issue outside this module
+
+`ThalosFrontend/services/trustlessworkService.ts` still calls TW **directly from the
+browser** for every write (`escrowMigration.ts` keeps those migration flags `false`), using
+a hardcoded API key committed to the repo. Migrating each write to this relay is what
+removes that exposure — that is the whole point of this module.
