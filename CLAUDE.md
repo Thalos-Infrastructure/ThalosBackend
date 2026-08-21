@@ -13,7 +13,8 @@ and the server submits them.
 **Node 22+ is required, not Node 20**, even though `engines` says `>=20`. On Node 20 the
 app boots, maps every route, then dies in `SupabaseService.onModuleInit` with
 `Node.js detected but native WebSocket not found` — `@supabase/realtime-js` needs the
-global `WebSocket`, which only exists from Node 22.
+global `WebSocket`, which only exists from Node 22. **`.nvmrc` says `20` and is stale** —
+do not trust it.
 
 Package manager is **pnpm** (`packageManager` is pinned in `package.json`).
 
@@ -76,6 +77,30 @@ body. That is deliberate: build endpoints only ever return an **unsigned XDR**, 
 transaction is worthless until the real signer's wallet signs it. Authorization is
 enforced on-chain, not here. Do not add a write endpoint that has side effects before the
 signature — that assumption is what makes the thin checks safe.
+
+## Data model (Supabase)
+
+`SupabaseService.getClient()` always uses the **service-role** key, so every query here
+bypasses RLS. Authorization is the caller's job.
+
+- `auth_users` — `id` is the JWT `sub`; holds `wallet_public_key`
+- `profiles` — keyed by `wallet_address`, holds `role` / `account_type` and `email`
+- `user_wallets` — additional wallets linked to a user
+- `agreements`, `agreement_participants`, `agreement_activity`, `disputes`,
+  `dispute_resolutions`
+
+**`auth_users.id` is not `profiles.id`.** The two join through the wallet address, and
+mixing them up is the most common source of "user not found" bugs here.
+
+## Conventions
+
+- The backend **only validates** JWTs, never signs them — signing lives in the frontend's
+  Next routes. `@nestjs/jwt` is a dependency but unused; `jsonwebtoken` is test-only.
+- Global `ValidationPipe` with `whitelist` + `forbidNonWhitelisted` + `transform`, so a DTO
+  that does not declare a property will reject the request rather than ignore the field.
+- No cache and no Redis. Transient tokens (wallet challenges) use a stateless HMAC proof
+  with a 5-minute TTL and **no nonce store**, so a challenge is replayable until it expires
+  — see `src/wallets/helpers/stellar-verification.helper.ts`.
 
 ## Events and email notifications
 

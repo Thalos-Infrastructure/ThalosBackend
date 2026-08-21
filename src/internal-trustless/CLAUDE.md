@@ -21,6 +21,9 @@ The narrative docs at docs.trustlesswork.com omit most endpoint paths.
   - Roles are **camelCase** upstream (`serviceProvider`), snake_case in our app.
     `EscrowsController.TW_ROLE_MAP` translates; sending `service_provider` makes TW query a
     non-existent field and answer a misleading 500 about a missing index.
+  - The two helpers reject each other's parameters: `get-escrows-by-signer` rejects
+    `role`/`roleAddress`, `get-escrows-by-role` rejects `signer`. Both also accept `page`,
+    `pageSize` (TW defaults to 8 — we send 5), `validateOnChain`, `status` and `type`.
 - Dispute is split by escrow type: single-release disputes the **whole escrow**
   (`dispute-escrow`, no milestone), multi-release disputes **one milestone**
   (`dispute-milestone`).
@@ -76,6 +79,11 @@ They still spend our API key, so treat the throttle as a quota guard and lower i
 grows. **Never mark a write `@Public()`.**
 
 ## Failure handling
+
+`relayToTrustless(method, path, query?, body?)` in `trustless-relay.helper.ts` is the single
+egress point; it attaches the server-side `x-api-key` and **allow-lists path prefixes**
+(`deployer/`, `escrow/`, `helper/`) so a bug upstream cannot turn the relay into an open
+proxy to arbitrary TW routes.
 
 `relayWrite` distinguishes upstream 4xx from 5xx: a 4xx is rethrown unchanged (retrying a
 rejected request only burns quota), a 5xx is enqueued in the retry queue with an
