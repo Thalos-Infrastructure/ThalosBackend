@@ -11,6 +11,9 @@ import {
 export type WalletType =
   'custodial' | 'freighter' | 'lobstr' | 'xbull' | 'albedo' | 'accesly' | 'other';
 
+/** Identity provider behind a custodial wallet. External wallets carry none. */
+export type AuthProvider = 'pollar' | 'accesly';
+
 export class LinkWalletDto {
   @IsString()
   wallet_address: string;
@@ -31,10 +34,21 @@ export class LinkWalletDto {
   @IsString()
   signature?: string; // For verification
 
-  /** Login method that produced this wallet ('accesly', 'pollar', …). #108/#109 */
+  /**
+   * Which login produced this wallet (#108 social/email via Pollar, #109 passkey
+   * via Accesly). Only meaningful for provisioned wallets — 'custodial' or
+   * 'accesly'; an external wallet is connected, not provisioned, so it has no
+   * identity provider.
+   */
   @IsOptional()
   @IsString()
-  auth_provider?: string;
+  @IsIn(['pollar', 'accesly'])
+  auth_provider?: AuthProvider;
+
+  /** Pollar user id owning the wallet, when `auth_provider` is 'pollar'. */
+  @IsOptional()
+  @IsString()
+  pollar_user_id?: string;
 
   /**
    * Smart Account contract address (C…). wallet_address stays the G-address.

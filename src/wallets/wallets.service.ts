@@ -10,7 +10,13 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ApiClient } from '../common/api/api-client';
-import { LinkWalletDto, UpdateWalletDto, VerifyWalletDto, WalletType } from './dto/wallets.dto';
+import {
+  AuthProvider,
+  LinkWalletDto,
+  UpdateWalletDto,
+  VerifyWalletDto,
+  WalletType,
+} from './dto/wallets.dto';
 import {
   WALLET_OWNERSHIP_PREFIX,
   networkPassphrase,
@@ -27,12 +33,14 @@ export interface UserWallet {
   is_primary: boolean;
   is_verified: boolean;
   verified_at: string | null;
-  created_at: string;
-  updated_at: string;
-  /** Login method that produced this wallet ('accesly', 'pollar', …). #108/#109 */
-  auth_provider?: string | null;
+  /** Identity provider that produced a provisioned wallet; null for external ones. */
+  auth_provider: AuthProvider | null;
+  /** Pollar user id when auth_provider is 'pollar'; null otherwise. */
+  pollar_user_id: string | null;
   /** Soroban Smart Account address (C…); wallet_address holds the G-address. */
   c_address?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface WalletWithBalance extends UserWallet {
@@ -215,10 +223,28 @@ export class WalletsService {
     let isVerified: boolean;
     let verifiedAt: string | null;
 
+    // Identity provider only applies to provisioned (custodial) wallets. An
+    // external wallet is connected by its owner, so accepting an auth_provider
+    // for one would record an origin that never happened.
+    let authProvider: AuthProvider | null = null;
+    let pollarUserId: string | null = null;
+
     if (dto.wallet_type === 'custodial') {
       // Custodial wallets are auto-verified
       isVerified = true;
       verifiedAt = new Date().toISOString();
+
+      authProvider = dto.auth_provider ?? null;
+      pollarUserId = dto.pollar_user_id ?? null;
+
+      // pollar_user_id identifies a Pollar user; pairing it with another provider
+      // would leave a row whose two identity columns disagree.
+      if (pollarUserId && authProvider !== 'pollar') {
+        throw new BadRequestException("pollar_user_id requires auth_provider 'pollar'");
+      }
+      if (authProvider === 'pollar' && !pollarUserId) {
+        throw new BadRequestException("auth_provider 'pollar' requires pollar_user_id");
+      }
     } else if (dto.wallet_type === 'accesly') {
       // Accesly (passkey smart account, #109) can't produce a classic SEP-0043
       // wallet signature here, but ownership of the G-address was already
@@ -240,7 +266,19 @@ export class WalletsService {
       }
       isVerified = true;
       verifiedAt = new Date().toISOString();
+
+      // An Accesly wallet is provisioned by the passkey login, so wallet_type
+      // already names the provider. dto.auth_provider may echo it but cannot
+      // change it — a row saying 'accesly' with any other provider would lie.
+      authProvider = 'accesly';
+      pollarUserId = null;
     } else {
+      if (dto.auth_provider || dto.pollar_user_id) {
+        throw new BadRequestException(
+          'auth_provider and pollar_user_id are only valid for provisioned (custodial, accesly) wallets',
+        );
+      }
+
       // Non-custodial: require signed_message + signature
       if (!dto.signed_message || !dto.signature) {
         throw new BadRequestException(
@@ -282,14 +320,14 @@ export class WalletsService {
       verified_at: verifiedAt,
     };
 
-    // Accesly (#109) / Pollar (FE #108) identity: login method + Smart Account
-    // C-address. wallet_address keeps the derived G-address, which is what
-    // Trustless Work role matching (by-signer / by-role) keys on.
-    const authProvider =
-      dto.auth_provider ?? (dto.wallet_type === 'accesly' ? 'accesly' : undefined);
+    // Accesly (#109) / Pollar (FE #108) identity: login method, Pollar user id
+    // and Smart Account C-address. wallet_address keeps the derived G-address,
+    // which is what Trustless Work role matching (by-signer / by-role) keys on.
+    // authProvider and pollarUserId were resolved per wallet_type above.
     const identityRow = {
       ...baseRow,
       ...(authProvider ? { auth_provider: authProvider } : {}),
+      ...(pollarUserId ? { pollar_user_id: pollarUserId } : {}),
       ...(dto.c_address ? { c_address: dto.c_address } : {}),
     };
 
@@ -300,11 +338,11 @@ export class WalletsService {
       .select()
       .single();
 
-    // Fall back to the base row while migration 008 hasn't been applied.
+    // Fall back to the base row while migrations 008/013 haven't been applied.
     if (error && error.code === 'PGRST204') {
       console.warn(
-        `[wallets] user_wallets is missing the identity columns (migration 008 pending) — ` +
-          `linking ${dto.wallet_address} WITHOUT auth_provider/c_address`,
+        `[wallets] user_wallets is missing the identity columns (migrations 008/013 pending) — ` +
+          `linking ${dto.wallet_address} WITHOUT auth_provider/pollar_user_id/c_address`,
       );
       ({ data, error } = await this.supabase
         .getClient()
