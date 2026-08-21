@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test } from '@nestjs/testing';
+import { ThrottlerModule } from '@nestjs/throttler';
 import type { INestApplication } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
 import request from 'supertest';
@@ -32,6 +33,12 @@ import { AgreementChatService } from '../agreement-chat/agreement-chat.service';
 jest.mock('@stellar/stellar-sdk', () => ({
   Keypair: {
     fromPublicKey: () => ({ verify: () => true }),
+  },
+  // EscrowsController validates the address on its @Public() reads. This suite uses
+  // readable fake wallets (see WALLET), so accept any G-prefixed string instead of
+  // real StrKey checksums — address validation has its own unit coverage.
+  StrKey: {
+    isValidEd25519PublicKey: (value: string) => typeof value === 'string' && value.startsWith('G'),
   },
 }));
 
@@ -356,7 +363,9 @@ describe('migrated backend flows (integration)', () => {
 
     supabase = new InMemorySupabase();
     const moduleRef = await Test.createTestingModule({
-      imports: [AuthModule],
+      // EscrowsController throttles its @Public() reads, so the guard needs the
+      // throttler options. A high limit keeps the suite from tripping a 429.
+      imports: [AuthModule, ThrottlerModule.forRoot([{ ttl: 60_000, limit: 1000 }])],
       controllers: [
         AgreementsController,
         DisputesController,

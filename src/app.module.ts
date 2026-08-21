@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { CommonModule } from './common/common.module';
 import { AuthModule } from './auth/auth.module';
 import { SupabaseModule } from './supabase/supabase.module';
@@ -25,6 +26,9 @@ import { IdentityProvidersModule } from './identity-providers/identity-providers
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env.local', '.env'] }),
     EventEmitterModule.forRoot(),
+    // Only applied where a controller opts in with `@UseGuards(ThrottlerGuard)`
+    // — currently the `@Public()` escrow reads. Authenticated routes are unchanged.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 30 }]),
     CommonModule,
     SupabaseModule,
     AuthModule,

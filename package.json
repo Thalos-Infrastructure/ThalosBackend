@@ -31,6 +31,7 @@
     "@nestjs/passport": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/swagger": "^11.2.6",
+    "@nestjs/throttler": "^6.5.0",
     "@stellar/stellar-sdk": "^15.0.1",
     "@supabase/supabase-js": "^2.49.1",
     "class-transformer": "^0.5.1",
