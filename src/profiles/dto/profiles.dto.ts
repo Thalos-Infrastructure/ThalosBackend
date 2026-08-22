@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsIn } from 'class-validator';
+import { IsBoolean, IsString, IsNotEmpty, IsOptional, IsIn, Matches } from 'class-validator';
 
 export class GetOrCreateProfileDto {
   @IsString()
@@ -28,6 +28,14 @@ export class UpdateProfileDto {
   @IsIn(['personal', 'enterprise'])
   @IsOptional()
   account_type?: 'personal' | 'enterprise';
+
+  // NOTE: `handle` field is owned by Connect (#159 / migration 009).
+  // It will be added to this DTO when that PR merges.
+  // Do NOT add handle here to avoid migration/column conflicts.
+
+  @IsBoolean()
+  @IsOptional()
+  show_earnings?: boolean;
 }
 
 export class SetUserRoleDto {
