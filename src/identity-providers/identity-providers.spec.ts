@@ -49,6 +49,10 @@ describe('IdentityProvidersService', () => {
           provide: KYC_PROVIDER,
           useValue: mockProvider,
         },
+        {
+          provide: EventEmitter2,
+          useValue: { emit: jest.fn() },
+        },
       ],
     }).compile();
 
