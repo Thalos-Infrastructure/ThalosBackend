@@ -12,6 +12,7 @@ import {
   AgreementCompletedData,
   EvidenceSubmittedData,
   MilestoneApprovedData,
+  MilestoneReleasedData,
 } from './types/notification-data.types';
 
 /**
@@ -66,6 +67,15 @@ export class NotificationsListener {
       await this.notifications.notifyMilestoneApproved(data);
     } catch (err) {
       this.logger.error('handleMilestoneApproved failed', err);
+    }
+  }
+
+  @OnEvent(AGREEMENT_EVENTS.MILESTONE_RELEASED)
+  async handleMilestoneReleased(data: MilestoneReleasedData): Promise<void> {
+    try {
+      await this.notifications.notifyMilestoneReleased(data);
+    } catch (err) {
+      this.logger.error('handleMilestoneReleased failed', err);
     }
   }
 

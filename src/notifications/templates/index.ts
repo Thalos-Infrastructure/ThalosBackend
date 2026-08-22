@@ -3,6 +3,7 @@ import {
   AgreementFundedData,
   EvidenceSubmittedData,
   MilestoneApprovedData,
+  MilestoneReleasedData,
   DisputeOpenedData,
   DisputeResolvedData,
   AgreementCompletedData,
@@ -172,6 +173,55 @@ export function milestoneApprovedTemplate(data: MilestoneApprovedData): string {
 
     <p style="color: rgba(255,255,255,0.8); margin: 0 0 24px;">
       The payment for this milestone has been automatically released from escrow.
+    </p>
+
+    <a href="https://thalosplatform.xyz/agreements/${data.agreementId}"
+       style="display: inline-block; background: #F0B400; color: #0C1220; padding: 12px 24px;
+              text-decoration: none; border-radius: 8px; font-weight: 600;">
+      View Agreement
+    </a>
+  `;
+  return baseTemplate(content);
+}
+
+export function milestoneReleasedTemplate(data: MilestoneReleasedData): string {
+  const content = `
+    <h2 style="color: #FFFFFF; margin: 0 0 16px;">Payment Released</h2>
+    <p style="color: rgba(255,255,255,0.8); margin: 0 0 24px;">
+      Escrow funds for a milestone have been released on-chain.
+    </p>
+
+    <div style="background: #1a2540; border-radius: 8px; padding: 20px; margin-bottom: 24px; border-left: 4px solid #F0B400;">
+      <h3 style="color: #FFFFFF; margin: 0 0 12px; font-size: 18px;">${data.agreementTitle}</h3>
+
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+          <td style="padding: 8px 0; color: rgba(255,255,255,0.55); width: 120px;">Milestone:</td>
+          <td style="padding: 8px 0; color: #FFFFFF; font-weight: 600;">#${data.milestoneIndex + 1} - ${data.milestoneDescription}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; color: rgba(255,255,255,0.55);">Released:</td>
+          <td style="padding: 8px 0; color: #F0B400; font-weight: 600;">${formatAmount(data.milestoneAmount, data.asset)}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; color: rgba(255,255,255,0.55);">Released by:</td>
+          <td style="padding: 8px 0; color: #FFFFFF;">${data.actorName || formatWallet(data.actorWallet)}</td>
+        </tr>
+        ${
+          data.evidence
+            ? `
+        <tr>
+          <td style="padding: 8px 0; color: rgba(255,255,255,0.55);">Evidence:</td>
+          <td style="padding: 8px 0; color: #FFFFFF;">${data.evidence}</td>
+        </tr>
+        `
+            : ''
+        }
+      </table>
+    </div>
+
+    <p style="color: rgba(255,255,255,0.8); margin: 0 0 24px;">
+      The funds have left escrow and are now in the recipient's wallet. No further action is required for this milestone.
     </p>
 
     <a href="https://thalosplatform.xyz/agreements/${data.agreementId}"
