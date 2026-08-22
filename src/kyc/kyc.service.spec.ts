@@ -81,7 +81,7 @@ describe('KycService.createSession', () => {
 
     const { verification } = await svc.createSession('user-1', baseDto);
 
-    expect(provider.createSession).toHaveBeenCalledWith({ userId: 'user-1', metadata: undefined });
+    expect(provider.createSession).toHaveBeenCalledWith({ userId: 'user-1', metadata: {} });
     expect(verification).toEqual(inserted);
   });
 
@@ -95,8 +95,11 @@ describe('KycService.createSession', () => {
     expect(verification).toEqual(existing);
   });
 
-  it('returns the existing record without calling the provider when in_review', async () => {
-    const existing = record({ status: 'pending' }); // in_review maps to 'pending' in DB
+  it('treats DB pending as a live session (in_review maps to pending in DB)', async () => {
+    // The provider may report in_review, but mapProviderStatus stores it as
+    // 'pending' in the verifications table (CHECK constraint). This test
+    // verifies that a pending row is treated as a live session and not retried.
+    const existing = record({ status: 'pending' });
     const { svc, provider } = buildService({ getClientCalls: [chainMock(existing)] });
 
     const { verification } = await svc.createSession('user-1', baseDto);
@@ -121,6 +124,38 @@ describe('KycService.createSession', () => {
     const { svc, provider } = buildService({
       getClientCalls: [chainMock(existing), chainMock(updated)],
       providerSession: { providerVerificationId: 'sess-456' },
+    });
+
+    const { verification } = await svc.createSession('user-1', baseDto);
+
+    expect(provider.createSession).toHaveBeenCalled();
+    expect(verification.status).toBe('pending');
+  });
+
+  it('allows a fresh attempt via the provider when previously expired', async () => {
+    // Expired sessions should be treated the same as rejected: call the
+    // provider again and UPDATE the existing row (not INSERT, which would
+    // hit the unique constraint and return the stale expired row).
+    const existing = record({ status: 'expired' });
+    const updated = record({ status: 'pending', provider_reference: 'sess-789' });
+    const { svc, provider } = buildService({
+      getClientCalls: [chainMock(existing), chainMock(updated)],
+      providerSession: { providerVerificationId: 'sess-789' },
+    });
+
+    const { verification } = await svc.createSession('user-1', baseDto);
+
+    expect(provider.createSession).toHaveBeenCalled();
+    expect(verification.status).toBe('pending');
+    expect(verification.provider_reference).toBe('sess-789');
+  });
+
+  it('allows a fresh attempt via the provider when previously unverified', async () => {
+    const existing = record({ status: 'unverified' });
+    const updated = record({ status: 'pending', provider_reference: 'sess-abc' });
+    const { svc, provider } = buildService({
+      getClientCalls: [chainMock(existing), chainMock(updated)],
+      providerSession: { providerVerificationId: 'sess-abc' },
     });
 
     const { verification } = await svc.createSession('user-1', baseDto);
@@ -185,5 +220,18 @@ describe('KycService.createSession', () => {
       userId: 'user-1',
       metadata: { locale: 'es', documentType: 'passport' },
     });
+  });
+
+  it('throws BadRequestException when the DB update fails on retryable status', async () => {
+    const existing = record({ status: 'expired' });
+    const { svc, provider } = buildService({
+      getClientCalls: [
+        chainMock(existing), // findByUserId: found expired
+        chainMock(null, { code: 'XX000', message: 'DB update failed' }), // update fails
+      ],
+    });
+
+    await expect(svc.createSession('user-1', baseDto)).rejects.toThrow(BadRequestException);
+    expect(provider.createSession).toHaveBeenCalled();
   });
 });
