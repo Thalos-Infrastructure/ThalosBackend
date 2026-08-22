@@ -32,7 +32,7 @@ function buildService(calls: unknown[]) {
 describe('ReputationService.getPublicReputation', () => {
   it('returns zeroed counts when builder has no agreements', async () => {
     const { svc } = buildService([
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'alice', show_earnings: false, github_verified: null }),
+      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'alice', show_earnings: false }),
       chainMock([]), // agreement_participants: empty
     ]);
 
@@ -50,7 +50,7 @@ describe('ReputationService.getPublicReputation', () => {
 
   it('counts completed agreements and released milestones correctly', async () => {
     const { svc } = buildService([
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'bob', show_earnings: false, github_verified: null }),
+      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'bob', show_earnings: false }),
       chainMock([{ agreement_id: 'a1' }, { agreement_id: 'a2' }]),
       chainMock([
         {
@@ -81,7 +81,7 @@ describe('ReputationService.getPublicReputation', () => {
 
   it('includes total_released_usdc when builder has opted in', async () => {
     const { svc } = buildService([
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'carol', show_earnings: true, github_verified: true }),
+      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'carol', show_earnings: true }),
       chainMock([{ agreement_id: 'a1' }]),
       chainMock([
         {
@@ -98,17 +98,7 @@ describe('ReputationService.getPublicReputation', () => {
     const result = await svc.getPublicReputation('carol');
 
     expect(result.total_released_usdc).toBe(400.75);
-    expect(result.github_verified).toBe(true);
-  });
-
-  it('returns github_verified as null when C6 data is not yet available', async () => {
-    const { svc } = buildService([
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'dave', show_earnings: false, github_verified: null }),
-      chainMock([]),
-    ]);
-
-    const result = await svc.getPublicReputation('dave');
-    expect(result.github_verified).toBeNull();
+    expect(result.github_verified).toBeNull(); // always null until C6 (#157)
   });
 
   it('throws NotFoundException for unknown handle', async () => {
@@ -133,7 +123,7 @@ describe('ReputationService.getMyReputation', () => {
       // profileByUserId: auth_users lookup
       chainMock({ wallet_public_key: 'GWALLET' }),
       // profileByUserId: profiles lookup
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'alice', show_earnings: false, github_verified: null }),
+      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'alice', show_earnings: false }),
       // fetchBuilderAgreements: participants
       chainMock([{ agreement_id: 'a1' }]),
       // fetchBuilderAgreements: agreements
@@ -155,12 +145,13 @@ describe('ReputationService.getMyReputation', () => {
     expect(result.released_milestones_count).toBe(1);
     expect(result.total_released_usdc).toBe(300); // always included for /me
     expect(result.pr_backed_milestone_count).toBe(1);
+    expect(result.github_verified).toBeNull(); // always null until C6 (#157)
   });
 
   it('always includes earnings for /me even when show_earnings is false', async () => {
     const { svc } = buildService([
       chainMock({ wallet_public_key: 'GWALLET' }),
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'bob', show_earnings: false, github_verified: null }),
+      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'bob', show_earnings: false }),
       chainMock([{ agreement_id: 'a1' }]),
       chainMock([
         {
@@ -193,7 +184,7 @@ describe('ReputationService.getMyReputation', () => {
   it('counts PR-backed milestones (evidence_urls present)', async () => {
     const { svc } = buildService([
       chainMock({ wallet_public_key: 'GWALLET' }),
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'eve', show_earnings: false, github_verified: null }),
+      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'eve', show_earnings: false }),
       chainMock([{ agreement_id: 'a1' }]),
       chainMock([
         {
@@ -216,7 +207,7 @@ describe('ReputationService.getMyReputation', () => {
   it('handles agreements with null milestones gracefully', async () => {
     const { svc } = buildService([
       chainMock({ wallet_public_key: 'GWALLET' }),
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'frank', show_earnings: false, github_verified: null }),
+      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'frank', show_earnings: false }),
       chainMock([{ agreement_id: 'a1' }]),
       chainMock([
         {
@@ -236,7 +227,7 @@ describe('ReputationService.getMyReputation', () => {
   it('handles non-numeric milestone amounts gracefully', async () => {
     const { svc } = buildService([
       chainMock({ wallet_public_key: 'GWALLET' }),
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'grace', show_earnings: true, github_verified: null }),
+      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'grace', show_earnings: true }),
       chainMock([{ agreement_id: 'a1' }]),
       chainMock([
         {
@@ -252,5 +243,16 @@ describe('ReputationService.getMyReputation', () => {
 
     const result = await svc.getMyReputation('user-grace');
     expect(result.total_released_usdc).toBe(100);
+  });
+
+  it('returns null handle when profile has no handle set yet', async () => {
+    const { svc } = buildService([
+      chainMock({ wallet_public_key: 'GWALLET' }),
+      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: null, show_earnings: false }),
+      chainMock([]),
+    ]);
+
+    const result = await svc.getMyReputation('user-no-handle');
+    expect(result.handle).toBeNull();
   });
 });

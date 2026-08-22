@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
@@ -23,21 +22,33 @@ interface AgreementRow {
 
 /** Public-safe reputation payload returned by both endpoints. */
 export interface ReputationPayload {
-  /** Unique public profile handle. */
-  handle: string;
+  /**
+   * Unique public profile handle.
+   * Set by Connect (#159) via the `handle` column on `profiles`.
+   */
+  handle: string | null;
   /** Number of agreements where this builder completed work. */
   completed_agreements_count: number;
   /** Number of milestones across the builder's agreements that have been released. */
   released_milestones_count: number;
   /**
    * Sum of released milestone amounts in USDC.
-   * Null when the builder has opted out (show_earnings = false) or the public
-   * route is used without the builder's own session.
+   * Null when the builder has opted out (show_earnings = false) on the public route.
    */
   total_released_usdc: number | null;
-  /** Whether the builder's GitHub identity has been verified (C6). Null until available. */
+  /**
+   * Whether the builder's GitHub identity has been verified via C6.
+   *
+   * Currently always null — will be derived from `github_verified_at IS NOT NULL`
+   * once C6 GitHub evidence (#157) populates that column.
+   */
   github_verified: boolean | null;
-  /** Number of milestones with submitted evidence (PR-backed). */
+  /**
+   * Number of milestones with submitted evidence URLs.
+   *
+   * TODO: Once milestone_evidence_prs table is available (C6 / #157),
+   * derive this from attached merged PRs rather than generic URL strings.
+   */
   pr_backed_milestone_count: number;
 }
 
@@ -47,19 +58,22 @@ export interface ReputationPayload {
 
 @Injectable()
 export class ReputationService {
-  private readonly logger = new Logger(ReputationService.name);
-
   constructor(private readonly supabase: SupabaseService) {}
 
   /**
    * Resolves a profile by handle. Throws NotFoundException if no profile
    * with that handle exists.
+   *
+   * REQUIRES: Connect migration (#159) to have landed first (adds `handle`
+   * column with unique partial index). Until then, PostgREST will reject
+   * the `.eq('handle', …)` filter — which is fine because this endpoint
+   * should not be called before #159 merges.
    */
   private async profileByHandle(handle: string) {
     const { data, error } = await this.supabase
       .getClient()
       .from('profiles')
-      .select('id, wallet_address, handle, show_earnings, github_verified')
+      .select('id, wallet_address, handle, show_earnings')
       .eq('handle', handle)
       .maybeSingle();
 
@@ -94,7 +108,7 @@ export class ReputationService {
     const { data: profile, error: profErr } = await this.supabase
       .getClient()
       .from('profiles')
-      .select('id, wallet_address, handle, show_earnings, github_verified')
+      .select('id, wallet_address, handle, show_earnings')
       .eq('wallet_address', wallet)
       .maybeSingle();
 
@@ -147,7 +161,10 @@ export class ReputationService {
    */
   private computeReputation(
     agreements: AgreementRow[],
-    profile: { handle: string; show_earnings: boolean; github_verified: boolean | null },
+    profile: {
+      handle: string | null;
+      show_earnings: boolean;
+    },
     opts: { includeEarnings: boolean },
   ): ReputationPayload {
     let completed_agreements_count = 0;
@@ -171,7 +188,9 @@ export class ReputationService {
           }
         }
 
-        // "PR-backed" = milestone has at least one evidence URL submitted
+        // "PR-backed" = milestone has at least one evidence URL submitted.
+        // TODO: once milestone_evidence_prs table is available (C6 / #157),
+        // derive from attached merged PRs instead.
         if (m.evidence_urls && m.evidence_urls.length > 0) {
           pr_backed_milestone_count++;
         }
@@ -185,7 +204,9 @@ export class ReputationService {
       // Only include earnings when the builder has opted in AND the caller
       // is the builder themselves (via /me) or earnings are opted in.
       total_released_usdc: opts.includeEarnings ? total_released_usdc : null,
-      github_verified: profile.github_verified,
+      // Will be derived from github_verified_at IS NOT NULL once C6 (#157)
+      // populates that column. Null until then.
+      github_verified: null,
       pr_backed_milestone_count,
     };
   }
@@ -194,6 +215,9 @@ export class ReputationService {
    * Public reputation endpoint — no auth required.
    * Returns a safe subset of the reputation payload. Earnings are only
    * included when the builder has opted in via show_earnings.
+   *
+   * REQUIRES: Connect migration (#159) to have landed first so that the
+   * `handle` column exists on `profiles`.
    */
   async getPublicReputation(handle: string): Promise<ReputationPayload> {
     const profile = await this.profileByHandle(handle);

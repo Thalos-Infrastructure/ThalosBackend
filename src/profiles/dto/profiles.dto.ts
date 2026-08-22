@@ -29,12 +29,9 @@ export class UpdateProfileDto {
   @IsOptional()
   account_type?: 'personal' | 'enterprise';
 
-  @IsString()
-  @IsOptional()
-  @Matches(/^[a-z0-9][a-z0-9_-]{1,30}$/, {
-    message: 'handle must be 2-31 chars: lowercase alphanumeric, hyphens, underscores',
-  })
-  handle?: string;
+  // NOTE: `handle` field is owned by Connect (#159 / migration 009).
+  // It will be added to this DTO when that PR merges.
+  // Do NOT add handle here to avoid migration/column conflicts.
 
   @IsBoolean()
   @IsOptional()
