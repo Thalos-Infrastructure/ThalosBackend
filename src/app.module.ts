@@ -20,6 +20,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
 import { RetryQueueModule } from './retry-queue/retry-queue.module';
 import { VerificationModule } from './verification/verification.module';
 import { KybModule } from './kyb/kyb.module';
+import { KycModule } from './kyc/kyc.module';
 import { IdentityProvidersModule } from './identity-providers/identity-providers.module';
 
 @Module({
@@ -46,6 +47,7 @@ import { IdentityProvidersModule } from './identity-providers/identity-providers
     WebhooksModule,
     VerificationModule,
     KybModule,
+    KycModule,
     IdentityProvidersModule,
   ],
   controllers: [RootController],

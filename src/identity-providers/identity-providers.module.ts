@@ -48,6 +48,6 @@ const PROVIDER_MAP: Record<string, new (config: IdentityProviderConfig) => IKycP
       },
     },
   ],
-  exports: [IdentityProvidersService],
+  exports: [IdentityProvidersService, KYC_PROVIDER],
 })
 export class IdentityProvidersModule {}
