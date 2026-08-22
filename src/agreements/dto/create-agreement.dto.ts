@@ -8,6 +8,7 @@ import {
   IsUUID,
   ValidateNested,
 } from 'class-validator';
+import { MILESTONE_STATUSES, type MilestoneStatus } from '../../common/milestone-status';
 
 class MilestoneDto {
   @IsString()
@@ -16,8 +17,8 @@ class MilestoneDto {
   @IsString()
   amount: string;
 
-  @IsIn(['pending', 'approved', 'released'])
-  status: 'pending' | 'approved' | 'released';
+  @IsIn([...MILESTONE_STATUSES])
+  status: MilestoneStatus;
 }
 
 class ParticipantDto {

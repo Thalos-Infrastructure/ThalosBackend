@@ -9,6 +9,7 @@ import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
 import { validateTransition } from '../agreements/agreement.validator';
 import { RetryQueueService } from '../retry-queue/retry-queue.service';
 import { RetryJobType } from '../retry-queue/retry-queue.types';
+import { normalizeMilestoneStatus } from '../common/milestone-status';
 import type { TrustlessWorkEventDto } from './dto/trustless-work-event.dto';
 
 interface EventConfig {
@@ -261,7 +262,17 @@ export class WebhooksService implements OnModuleInit {
     }
 
     if (payload.milestone?.status) {
-      milestones[milestoneIndex].status = payload.milestone.status;
+      // Normalize legacy TW milestone statuses (e.g. "completed" → "released")
+      // so the local DB always uses the canonical Thalos enum.
+      const normalized = normalizeMilestoneStatus(payload.milestone.status);
+      if (normalized) {
+        milestones[milestoneIndex].status = normalized;
+      } else {
+        this.logger.warn(
+          `Skipping unknown milestone status "${payload.milestone.status}" ` +
+            `for contractId="${payload.contractId}"`,
+        );
+      }
     }
     if (payload.milestone?.description) {
       milestones[milestoneIndex].description = payload.milestone.description;

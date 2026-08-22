@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   HttpCode,
+  Logger,
   OnModuleInit,
   Param,
   Post,
@@ -36,6 +37,8 @@ import {
 @Controller('escrows')
 @UseGuards(JwtAuthGuard)
 export class EscrowsController implements OnModuleInit {
+  private readonly logger = new Logger(EscrowsController.name);
+
   // NOTE: write endpoints require a valid JWT (class-level JwtAuthGuard) but do NOT
   // bind the JWT user to `signer`. Authorization of the actual signer is enforced by
   // the on-chain signature: build endpoints only return an UNSIGNED XDR, and the
@@ -199,11 +202,28 @@ export class EscrowsController implements OnModuleInit {
   /**
    * POST /escrows/change-milestone-status
    * Cambiar el estado de un milestone (evidencia + status). Devuelve { unsignedTransaction }.
+   *
+   * @deprecated Use `PATCH /v1/agreements/:id/milestones` instead.
+   * This endpoint is the deprecated duplicate of the canonical evidence submission path.
+   * Kept for backward compatibility with existing TW-proxy callers (GF-4-BE / issue #142).
+   * TW status values are passed through unchanged; normalization belongs to inbound
+   * webhook/reconciliation persistence paths.
    */
   @Post('change-milestone-status')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Cambiar estado de milestone (devuelve XDR sin firmar)' })
+  @ApiOperation({
+    summary: 'Cambiar estado de milestone (devuelve XDR sin firmar)',
+    description:
+      '@deprecated Use PATCH /v1/agreements/:id/milestones instead (canonical evidence endpoint). ' +
+      'This endpoint is kept for backward compatibility only.',
+    deprecated: true,
+  })
   async changeMilestoneStatus(@Body() dto: ChangeMilestoneStatusDto) {
+    this.logger.warn(
+      'POST /escrows/change-milestone-status is deprecated. ' +
+        'Use PATCH /v1/agreements/:id/milestones instead (GF-4-BE / #142).',
+    );
+
     return this.writeWithBackstop(
       RetryJobType.MILESTONE_UPDATE,
       `milestone_update:status:${dto.contractId}:${dto.milestoneIndex}:${dto.newStatus}`,

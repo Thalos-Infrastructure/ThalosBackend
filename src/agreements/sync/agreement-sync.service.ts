@@ -5,6 +5,7 @@ import { RetryQueueService } from '../../common/retry/retry-queue.service';
 import { AgreementValidationService } from '../validation/agreement-validation.service';
 import { relayToTrustless } from '../../internal-trustless/trustless-relay.helper';
 import { AGREEMENT_EVENTS } from '../../common/events/agreement-events.constants';
+import { normalizeMilestoneStatus } from '../../common/milestone-status';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -453,10 +454,19 @@ export class AgreementSyncService {
           }>;
 
           for (let i = 0; i < Math.min(thalosMilestones.length, escrow.milestones.length); i++) {
-            if (thalosMilestones[i].status !== escrow.milestones[i].status) {
-              thalosMilestones[i].status = escrow.milestones[i].status;
+            const twStatus = normalizeMilestoneStatus(escrow.milestones[i].status);
+            if (!twStatus) {
+              this.logger.warn(
+                `Skipping unknown TW milestone status "${escrow.milestones[i].status}" ` +
+                  `for agreement ${agreementId}`,
+              );
+              continue;
+            }
+            const previousStatus = thalosMilestones[i].status;
+            if (previousStatus !== twStatus) {
+              thalosMilestones[i].status = twStatus;
               actions.push(
-                `Reconciled milestone[${i}] status: "${thalosMilestones[i].status}" → "${escrow.milestones[i].status}"`,
+                `Reconciled milestone[${i}] status: "${previousStatus}" → "${twStatus}"`,
               );
             }
           }
