@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 
 // ---------------------------------------------------------------------------
@@ -137,9 +133,7 @@ export class ReputationService {
       return [];
     }
 
-    const agreementIds = participations.map(
-      (p: { agreement_id: string }) => p.agreement_id,
-    );
+    const agreementIds = participations.map((p: { agreement_id: string }) => p.agreement_id);
 
     // Step 2: fetch agreement data for those IDs
     const { data: agreements, error: agErr } = await this.supabase

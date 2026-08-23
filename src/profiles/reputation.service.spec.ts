@@ -2,17 +2,27 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ReputationService } from './reputation.service';
 
 // ---------------------------------------------------------------------------
-// Chainable Supabase mock (same pattern used across the project)
+// Chainable Supabase mock (same pattern used across the project).
+// Every non-terminal method returns itself, and maybeSingle()/single()
+// resolve to the configured { data, error }.  Intermediate chains are
+// also thenable so queries that omit a terminal (e.g. fetchBuilderAgreements
+// which just calls .select().eq() without .maybeSingle()) resolve correctly.
 // ---------------------------------------------------------------------------
 function chainMock(data: unknown, error: unknown = null) {
+  const result = { data, error };
   const obj: Record<string, jest.Mock> = {};
-  ['from', 'select', 'eq', 'in', 'insert', 'update', 'neq', 'maybeSingle', 'single'].forEach(
-    (m) => {
-      obj[m] = jest.fn().mockReturnValue(obj);
-    },
-  );
-  obj.maybeSingle = jest.fn().mockResolvedValue({ data, error });
-  obj.single = jest.fn().mockResolvedValue({ data, error });
+  ['from', 'select', 'eq', 'in', 'insert', 'update', 'neq'].forEach((m) => {
+    obj[m] = jest.fn().mockReturnValue(obj);
+  });
+  obj.maybeSingle = jest.fn().mockResolvedValue(result);
+  obj.single = jest.fn().mockResolvedValue(result);
+  // Make the chain thenable: when awaited without a terminal method,
+  // resolve to { data, error } — matching real Supabase client behaviour.
+  (obj as unknown as { then: jest.Mock }).then = jest
+    .fn()
+    .mockImplementation((resolve: (value: unknown) => unknown) =>
+      Promise.resolve(result).then(resolve),
+    );
   return obj;
 }
 
@@ -32,7 +42,12 @@ function buildService(calls: unknown[]) {
 describe('ReputationService.getPublicReputation', () => {
   it('returns zeroed counts when builder has no agreements', async () => {
     const { svc } = buildService([
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'alice', show_earnings: false }),
+      chainMock({
+        id: 'p1',
+        wallet_address: 'GWALLET',
+        handle: 'alice',
+        show_earnings: false,
+      }),
       chainMock([]), // agreement_participants: empty
     ]);
 
@@ -50,7 +65,12 @@ describe('ReputationService.getPublicReputation', () => {
 
   it('counts completed agreements and released milestones correctly', async () => {
     const { svc } = buildService([
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'bob', show_earnings: false }),
+      chainMock({
+        id: 'p1',
+        wallet_address: 'GWALLET',
+        handle: 'bob',
+        show_earnings: false,
+      }),
       chainMock([{ agreement_id: 'a1' }, { agreement_id: 'a2' }]),
       chainMock([
         {
@@ -65,7 +85,11 @@ describe('ReputationService.getPublicReputation', () => {
           id: 'a2',
           status: 'active',
           milestones: [
-            { status: 'released', amount: '200', evidence_urls: ['https://github.com/org/repo/pull/1'] },
+            {
+              status: 'released',
+              amount: '200',
+              evidence_urls: ['https://github.com/org/repo/pull/1'],
+            },
           ],
         },
       ]),
@@ -81,7 +105,12 @@ describe('ReputationService.getPublicReputation', () => {
 
   it('includes total_released_usdc when builder has opted in', async () => {
     const { svc } = buildService([
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'carol', show_earnings: true }),
+      chainMock({
+        id: 'p1',
+        wallet_address: 'GWALLET',
+        handle: 'carol',
+        show_earnings: true,
+      }),
       chainMock([{ agreement_id: 'a1' }]),
       chainMock([
         {
@@ -123,7 +152,12 @@ describe('ReputationService.getMyReputation', () => {
       // profileByUserId: auth_users lookup
       chainMock({ wallet_public_key: 'GWALLET' }),
       // profileByUserId: profiles lookup
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'alice', show_earnings: false }),
+      chainMock({
+        id: 'p1',
+        wallet_address: 'GWALLET',
+        handle: 'alice',
+        show_earnings: false,
+      }),
       // fetchBuilderAgreements: participants
       chainMock([{ agreement_id: 'a1' }]),
       // fetchBuilderAgreements: agreements
@@ -132,7 +166,11 @@ describe('ReputationService.getMyReputation', () => {
           id: 'a1',
           status: 'completed',
           milestones: [
-            { status: 'released', amount: '300', evidence_urls: ['https://github.com/pr/1'] },
+            {
+              status: 'released',
+              amount: '300',
+              evidence_urls: ['https://github.com/pr/1'],
+            },
           ],
         },
       ]),
@@ -151,7 +189,12 @@ describe('ReputationService.getMyReputation', () => {
   it('always includes earnings for /me even when show_earnings is false', async () => {
     const { svc } = buildService([
       chainMock({ wallet_public_key: 'GWALLET' }),
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'bob', show_earnings: false }),
+      chainMock({
+        id: 'p1',
+        wallet_address: 'GWALLET',
+        handle: 'bob',
+        show_earnings: false,
+      }),
       chainMock([{ agreement_id: 'a1' }]),
       chainMock([
         {
@@ -173,10 +216,7 @@ describe('ReputationService.getMyReputation', () => {
   });
 
   it('throws NotFoundException when user has no profile', async () => {
-    const { svc } = buildService([
-      chainMock({ wallet_public_key: 'GWALLET' }),
-      chainMock(null),
-    ]);
+    const { svc } = buildService([chainMock({ wallet_public_key: 'GWALLET' }), chainMock(null)]);
 
     await expect(svc.getMyReputation('user-no-profile')).rejects.toThrow(NotFoundException);
   });
@@ -184,16 +224,29 @@ describe('ReputationService.getMyReputation', () => {
   it('counts PR-backed milestones (evidence_urls present)', async () => {
     const { svc } = buildService([
       chainMock({ wallet_public_key: 'GWALLET' }),
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'eve', show_earnings: false }),
+      chainMock({
+        id: 'p1',
+        wallet_address: 'GWALLET',
+        handle: 'eve',
+        show_earnings: false,
+      }),
       chainMock([{ agreement_id: 'a1' }]),
       chainMock([
         {
           id: 'a1',
           status: 'active',
           milestones: [
-            { status: 'approved', amount: '100', evidence_urls: ['https://github.com/org/repo/pull/42'] },
+            {
+              status: 'approved',
+              amount: '100',
+              evidence_urls: ['https://github.com/org/repo/pull/42'],
+            },
             { status: 'released', amount: '100', evidence_urls: [] },
-            { status: 'pending', amount: '100', evidence_urls: ['https://github.com/org/repo/pull/43'] },
+            {
+              status: 'pending',
+              amount: '100',
+              evidence_urls: ['https://github.com/org/repo/pull/43'],
+            },
           ],
         },
       ]),
@@ -207,7 +260,12 @@ describe('ReputationService.getMyReputation', () => {
   it('handles agreements with null milestones gracefully', async () => {
     const { svc } = buildService([
       chainMock({ wallet_public_key: 'GWALLET' }),
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'frank', show_earnings: false }),
+      chainMock({
+        id: 'p1',
+        wallet_address: 'GWALLET',
+        handle: 'frank',
+        show_earnings: false,
+      }),
       chainMock([{ agreement_id: 'a1' }]),
       chainMock([
         {
@@ -227,7 +285,12 @@ describe('ReputationService.getMyReputation', () => {
   it('handles non-numeric milestone amounts gracefully', async () => {
     const { svc } = buildService([
       chainMock({ wallet_public_key: 'GWALLET' }),
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: 'grace', show_earnings: true }),
+      chainMock({
+        id: 'p1',
+        wallet_address: 'GWALLET',
+        handle: 'grace',
+        show_earnings: true,
+      }),
       chainMock([{ agreement_id: 'a1' }]),
       chainMock([
         {
@@ -248,7 +311,12 @@ describe('ReputationService.getMyReputation', () => {
   it('returns null handle when profile has no handle set yet', async () => {
     const { svc } = buildService([
       chainMock({ wallet_public_key: 'GWALLET' }),
-      chainMock({ id: 'p1', wallet_address: 'GWALLET', handle: null, show_earnings: false }),
+      chainMock({
+        id: 'p1',
+        wallet_address: 'GWALLET',
+        handle: null,
+        show_earnings: false,
+      }),
       chainMock([]),
     ]);
 
