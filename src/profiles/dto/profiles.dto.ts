@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -113,6 +114,11 @@ export class UpdateProfileDto {
   @IsObject()
   @IsOptional()
   org_links?: Record<string, unknown>;
+
+  // ---- Reputation fields (issue #147) ----
+  @IsBoolean()
+  @IsOptional()
+  show_earnings?: boolean;
 }
 
 export class SetUserRoleDto {

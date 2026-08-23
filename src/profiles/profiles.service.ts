@@ -24,6 +24,7 @@ export interface Profile {
   avatar_url: string | null;
   account_type: AccountType;
   role: ProfileRole;
+  show_earnings: boolean;
   created_at: string;
   updated_at: string;
   // Builder fields (Thalos Connect)
