@@ -24,8 +24,6 @@ export interface Profile {
   avatar_url: string | null;
   account_type: AccountType;
   role: ProfileRole;
-  // NOTE: `handle` will be added here when Connect (#159) merges.
-  // NOTE: `github_verified` will be derived from `github_verified_at` when C6 (#157) merges.
   show_earnings: boolean;
   created_at: string;
   updated_at: string;

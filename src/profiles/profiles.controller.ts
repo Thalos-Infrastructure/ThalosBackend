@@ -1,24 +1,9 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  Patch,
-  Post,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import {
-  CurrentUser,
-  type AuthUserCtx,
-} from '../auth/current-user.decorator';
+import { CurrentUser, type AuthUserCtx } from '../auth/current-user.decorator';
 import { ProfilesService } from './profiles.service';
-import {
-  ReputationService,
-  ReputationPayload,
-} from './reputation.service';
+import { ReputationService, ReputationPayload } from './reputation.service';
 import {
   GetOrCreateProfileDto,
   UpdateProfileDto,
@@ -43,20 +28,14 @@ export class ProfilesController {
 
   @Post()
   @UseGuards(JwtAuthGuard)
-  getOrCreate(
-    @CurrentUser() user: AuthUserCtx,
-    @Body() dto: GetOrCreateProfileDto,
-  ) {
+  getOrCreate(@CurrentUser() user: AuthUserCtx, @Body() dto: GetOrCreateProfileDto) {
     return this.profiles.getOrCreate(user.userId, dto);
   }
 
   // ---- Authenticated: update own profile ----
   @Patch()
   @UseGuards(JwtAuthGuard)
-  updateMe(
-    @CurrentUser() user: AuthUserCtx,
-    @Body() dto: UpdateProfileDto,
-  ) {
+  updateMe(@CurrentUser() user: AuthUserCtx, @Body() dto: UpdateProfileDto) {
     return this.profiles.updateForUser(user.userId, dto);
   }
 
@@ -81,9 +60,7 @@ export class ProfilesController {
       'PR-backed milestones, GitHub verification status). No auth required. ' +
       'Earnings (total_released_usdc) are only visible when the builder has opted in.',
   })
-  getPublicReputation(
-    @Param('handle') handle: string,
-  ): Promise<ReputationPayload> {
+  getPublicReputation(@Param('handle') handle: string): Promise<ReputationPayload> {
     return this.reputation.getPublicReputation(handle);
   }
 
@@ -95,9 +72,7 @@ export class ProfilesController {
       'Returns the authenticated builder full reputation data including earnings. ' +
       'Mirrors the public /handle/:handle/reputation endpoint but always includes total_released_usdc.',
   })
-  getMyReputation(
-    @CurrentUser() user: AuthUserCtx,
-  ): Promise<ReputationPayload> {
+  getMyReputation(@CurrentUser() user: AuthUserCtx): Promise<ReputationPayload> {
     return this.reputation.getMyReputation(user.userId);
   }
 
@@ -128,10 +103,7 @@ export class ProfilesController {
 
   @Patch('set-role')
   @UseGuards(JwtAuthGuard)
-  setRole(
-    @CurrentUser() user: AuthUserCtx,
-    @Body() dto: SetUserRoleDto,
-  ) {
+  setRole(@CurrentUser() user: AuthUserCtx, @Body() dto: SetUserRoleDto) {
     return this.profiles.setUserRole(user.userId, dto);
   }
 
