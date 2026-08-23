@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { KycService, KycVerificationRecord } from './kyc.service';
 import { CreateKycSessionDto } from './dto/kyc.dto';
-import type { KycStatus, SessionResult } from '../identity-providers/interfaces/kyc-provider.interface';
+import type { SessionResult } from '../identity-providers/interfaces/kyc-provider.interface';
 
 // ---------------------------------------------------------------------------
 // Chainable Supabase mock: every non-terminal method returns itself, and
@@ -213,7 +213,9 @@ describe('KycService.createSession', () => {
       getClientCalls: [chainMock(null), chainMock(inserted)],
     });
 
-    const dtoWithMeta: CreateKycSessionDto = { metadata: { locale: 'es', documentType: 'passport' } };
+    const dtoWithMeta: CreateKycSessionDto = {
+      metadata: { locale: 'es', documentType: 'passport' },
+    };
     await svc.createSession('user-1', dtoWithMeta);
 
     expect(provider.createSession).toHaveBeenCalledWith({

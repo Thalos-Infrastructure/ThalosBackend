@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Inject,
-  Injectable,
-} from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import {
   IKycProvider,
@@ -201,12 +197,7 @@ export class KycService {
     }
 
     // No existing record — create a brand-new session.
-    const verification = await this.upsertVerification(
-      userId,
-      null,
-      dto.metadata ?? {},
-      '',
-    );
+    const verification = await this.upsertVerification(userId, null, dto.metadata ?? {}, '');
     return { verification };
   }
 }
