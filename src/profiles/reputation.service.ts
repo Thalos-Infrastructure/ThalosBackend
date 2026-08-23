@@ -146,7 +146,7 @@ export class ReputationService {
       return [];
     }
 
-    return agreements as AgreementRow[];
+    return agreements;
   }
 
   /**
