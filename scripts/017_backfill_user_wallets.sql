@@ -1,4 +1,4 @@
--- 013_backfill_user_wallets.sql
+-- 017_backfill_user_wallets.sql
 --
 -- Consolidates `user_wallets` as the source of truth for wallet ownership.
 --
