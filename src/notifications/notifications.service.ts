@@ -7,6 +7,7 @@ import {
   AgreementFundedData,
   EvidenceSubmittedData,
   MilestoneApprovedData,
+  MilestoneReleasedData,
   DisputeOpenedData,
   DisputeResolvedData,
   AgreementCompletedData,
@@ -16,6 +17,7 @@ import {
   agreementFundedTemplate,
   evidenceSubmittedTemplate,
   milestoneApprovedTemplate,
+  milestoneReleasedTemplate,
   disputeOpenedTemplate,
   disputeResolvedTemplate,
   agreementCompletedTemplate,
@@ -210,6 +212,17 @@ export class NotificationsService implements OnModuleInit {
 
     const html = milestoneApprovedTemplate(data);
     await this.sendEmail(emails, `Milestone Approved: ${data.milestoneDescription}`, html);
+  }
+
+  /**
+   * Notify when escrow funds for a milestone are released on-chain.
+   */
+  async notifyMilestoneReleased(data: MilestoneReleasedData): Promise<void> {
+    const emails = await this.getParticipantEmails(data.agreementId);
+    if (emails.length === 0) return;
+
+    const html = milestoneReleasedTemplate(data);
+    await this.sendEmail(emails, `Payment Released: ${data.milestoneDescription}`, html);
   }
 
   /**
