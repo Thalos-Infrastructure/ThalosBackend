@@ -6,10 +6,7 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { SendMessageDto } from './dto/agreement-chat.dto';
-import {
-  resolveUserWallets,
-  userCanAccessAgreement,
-} from '../common/wallets/resolve-user-wallets';
+import { resolveUserWallets, userCanAccessAgreement } from '../common/wallets/resolve-user-wallets';
 
 export interface AgreementMessage {
   id: string;

@@ -16,10 +16,7 @@ import { validateAgreement, validateAgreementConsistency } from './agreement.val
 import { AgreementActivityService } from './agreement-activity.service';
 import { AgreementSyncService } from './sync/agreement-sync.service';
 import { AgreementValidationService } from './validation/agreement-validation.service';
-import {
-  resolveUserWallets,
-  userCanAccessAgreement,
-} from '../common/wallets/resolve-user-wallets';
+import { resolveUserWallets, userCanAccessAgreement } from '../common/wallets/resolve-user-wallets';
 
 @Injectable()
 export class AgreementsService {

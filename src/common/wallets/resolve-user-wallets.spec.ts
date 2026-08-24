@@ -3,11 +3,7 @@
  * the first one, because access was resolved from the single
  * `auth_users.wallet_public_key` field.
  */
-import {
-  resolveUserWallets,
-  userOwnsWallet,
-  userCanAccessAgreement,
-} from './resolve-user-wallets';
+import { resolveUserWallets, userOwnsWallet, userCanAccessAgreement } from './resolve-user-wallets';
 
 type Row = Record<string, unknown>;
 
