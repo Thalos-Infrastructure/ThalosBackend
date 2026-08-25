@@ -379,25 +379,35 @@ export class WalletsService {
       ...(dto.c_address ? { c_address: dto.c_address } : {}),
     };
 
-    let { data, error } = await this.supabase
-      .getClient()
-      .from('user_wallets')
-      .insert(identityRow)
-      .select()
-      .single();
+    const insertRow = (row: Record<string, unknown>) =>
+      this.supabase.getClient().from('user_wallets').insert(row).select().single();
 
-    // Fall back to the base row while migrations 008/013 haven't been applied.
-    if (error && error.code === 'PGRST204') {
+    let { data, error } = await insertRow(identityRow);
+
+    // PGRST204 means the table has no such column. Give up the identity one
+    // column at a time instead of all at once: with 008 applied and 013 pending
+    // — the state this branch deploys into — only pollar_user_id is missing, and
+    // dropping auth_provider along with it would leave a row indistinguishable
+    // from an external wallet while auth_users.wallet_provider says 'pollar'.
+    if (error?.code === 'PGRST204' && pollarUserId) {
+      console.warn(
+        `[wallets] user_wallets has no pollar_user_id (migration 013 pending) — ` +
+          `linking ${dto.wallet_address} WITHOUT it, keeping auth_provider`,
+      );
+      const { pollar_user_id: _omitted, ...withoutPollarUserId } = identityRow as Record<
+        string,
+        unknown
+      >;
+      ({ data, error } = await insertRow(withoutPollarUserId));
+    }
+
+    // Nothing of the identity survives 008 being absent too.
+    if (error?.code === 'PGRST204') {
       console.warn(
         `[wallets] user_wallets is missing the identity columns (migrations 008/013 pending) — ` +
           `linking ${dto.wallet_address} WITHOUT auth_provider/pollar_user_id/c_address`,
       );
-      ({ data, error } = await this.supabase
-        .getClient()
-        .from('user_wallets')
-        .insert(baseRow)
-        .select()
-        .single());
+      ({ data, error } = await insertRow(baseRow));
     }
 
     if (error) {

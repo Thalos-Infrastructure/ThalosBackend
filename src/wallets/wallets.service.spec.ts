@@ -18,8 +18,8 @@ interface MockState {
   authUserWallet?: string;
   /** The auth_users lookup fails instead of returning a row. */
   authUserQueryFails?: boolean;
-  /** First user_wallets insert fails with PGRST204 (identity columns missing). */
-  failFirstInsertWithPgrst204?: boolean;
+  /** Columns user_wallets does not have yet; an insert naming one fails PGRST204. */
+  missingColumns?: string[];
   inserts: Record<string, unknown>[];
   updates: { table: string; row: Record<string, unknown> }[];
 }
@@ -33,7 +33,6 @@ interface MockState {
  *  - auth_users:   update().eq()                     → captures wallet_provider
  */
 function makeSupabase(state: MockState): SupabaseService {
-  let insertCalls = 0;
   const client = {
     from(table: string) {
       let insertResult: { data: unknown; error: unknown } = { data: null, error: null };
@@ -61,12 +60,11 @@ function makeSupabase(state: MockState): SupabaseService {
           return Promise.resolve({ data: null, error: null }); // no existing user_wallets link
         },
         insert: (row: Record<string, unknown>) => {
-          insertCalls += 1;
           state.inserts.push(row);
-          insertResult =
-            state.failFirstInsertWithPgrst204 && insertCalls === 1
-              ? { data: null, error: { code: 'PGRST204', message: 'column not found' } }
-              : { data: { id: 'wallet-row-1', ...row }, error: null };
+          const missing = (state.missingColumns ?? []).find((column) => column in row);
+          insertResult = missing
+            ? { data: null, error: { code: 'PGRST204', message: `column ${missing} not found` } }
+            : { data: { id: 'wallet-row-1', ...row }, error: null };
           return builder;
         },
         single: () => Promise.resolve(insertResult),
@@ -239,10 +237,33 @@ describe('WalletsService.linkWallet — accesly identity (#109)', () => {
     );
   });
 
+  it('keeps auth_provider when only pollar_user_id is missing (008 applied, 013 pending)', async () => {
+    // The state this branch deploys into. Dropping the whole identity here would
+    // store a row indistinguishable from an external wallet while
+    // auth_users.wallet_provider says 'pollar' — the two tables disagreeing, with
+    // a console.warn as the only trace.
+    const state: MockState = {
+      authUserWallet: G_ADDRESS,
+      missingColumns: ['pollar_user_id'],
+      inserts: [],
+      updates: [],
+    };
+    const service = makeService(state);
+
+    const { wallet, error } = await service.linkWallet(USER_ID, pollarExternalDto());
+
+    expect(error).toBeNull();
+    expect(state.inserts).toHaveLength(2);
+    expect(state.inserts[0]).toHaveProperty('pollar_user_id');
+    expect(state.inserts[1]).not.toHaveProperty('pollar_user_id');
+    expect(state.inserts[1]).toHaveProperty('auth_provider', 'pollar');
+    expect(wallet).toMatchObject({ auth_provider: 'pollar' });
+  });
+
   it('falls back to the base row (no identity columns) on PGRST204 and still links', async () => {
     const state: MockState = {
       authUserWallet: G_ADDRESS,
-      failFirstInsertWithPgrst204: true,
+      missingColumns: ['auth_provider', 'pollar_user_id', 'c_address'],
       inserts: [],
       updates: [],
     };
@@ -254,6 +275,7 @@ describe('WalletsService.linkWallet — accesly identity (#109)', () => {
     expect(state.inserts).toHaveLength(2);
     expect(state.inserts[0]).toMatchObject({ auth_provider: 'accesly', c_address: C_ADDRESS });
     expect(state.inserts[1]).not.toHaveProperty('auth_provider');
+    expect(state.inserts[1]).not.toHaveProperty('pollar_user_id');
     expect(state.inserts[1]).not.toHaveProperty('c_address');
     expect(wallet).toMatchObject({ wallet_address: G_ADDRESS, wallet_type: 'accesly' });
   });
