@@ -12,10 +12,13 @@ import { LinkWalletDto } from './dto/wallets.dto';
 const USER_ID = 'user-1';
 const G_ADDRESS = 'GCIQLYVY7QA7NASMJDNH27UQANK6Q5E2IT6QZLXCKDIYGC3YAB7P5SC4';
 const C_ADDRESS = 'CCV4UYUFZBD5CZDXZTZU47VFLWPKWRJLEWDICJAUNRZLETX63GJ4UAHW';
+const POLLAR_USER_ID = 'cms7zi5yd00930ilc8vx3nf4u';
 
 interface MockState {
   /** auth_users.wallet_public_key for USER_ID (undefined = no row). */
   authUserWallet?: string;
+  /** auth_users.pollar_user_id for USER_ID — the identity the login recorded. */
+  authUserPollarId?: string;
   /** The auth_users lookup fails instead of returning a row. */
   authUserQueryFails?: boolean;
   /** Columns user_wallets does not have yet; an insert naming one fails PGRST204. */
@@ -53,7 +56,10 @@ function makeSupabase(state: MockState): SupabaseService {
               data:
                 state.authUserWallet === undefined
                   ? null
-                  : { wallet_public_key: state.authUserWallet },
+                  : {
+                      wallet_public_key: state.authUserWallet,
+                      pollar_user_id: state.authUserPollarId ?? null,
+                    },
               error: null,
             });
           }
@@ -101,14 +107,128 @@ function pollarExternalDto(overrides: Partial<LinkWalletDto> = {}): LinkWalletDt
     // A wallet the user brought: its own type, not 'custodial'.
     wallet_type: 'freighter',
     auth_provider: 'pollar',
-    pollar_user_id: 'cms7zi5yd00930ilc8vx3nf4u',
+    pollar_user_id: POLLAR_USER_ID,
     ...overrides,
   };
 }
 
+function pollarCustodialDto(overrides: Partial<LinkWalletDto> = {}): LinkWalletDto {
+  return {
+    wallet_address: G_ADDRESS,
+    // Pollar's main path: wallet.type 'internal', so Pollar holds the key.
+    wallet_type: 'custodial',
+    auth_provider: 'pollar',
+    pollar_user_id: POLLAR_USER_ID,
+    ...overrides,
+  };
+}
+
+describe('WalletsService.linkWallet — a Pollar identity is checked, not believed', () => {
+  it('records a provisioned wallet when both halves match what the login wrote', async () => {
+    const state: MockState = {
+      authUserWallet: G_ADDRESS,
+      authUserPollarId: POLLAR_USER_ID,
+      inserts: [],
+      updates: [],
+    };
+    const service = makeService(state);
+
+    const { wallet, error } = await service.linkWallet(USER_ID, pollarCustodialDto());
+
+    expect(error).toBeNull();
+    expect(wallet).toMatchObject({
+      wallet_type: 'custodial',
+      auth_provider: 'pollar',
+      pollar_user_id: POLLAR_USER_ID,
+      is_verified: true,
+    });
+  });
+
+  it("refuses a custodial wallet claiming another user's Pollar id", async () => {
+    // The hole this closes: 'custodial' is checked first in the branch chain and
+    // used to prove nothing, so the very same body refused as 'freighter' was
+    // stored — attributing the caller's wallet to someone else's Pollar identity,
+    // which is exactly what scripts/013's reverse-lookup index reads back.
+    const state: MockState = {
+      authUserWallet: G_ADDRESS,
+      authUserPollarId: POLLAR_USER_ID,
+      inserts: [],
+      updates: [],
+    };
+    const service = makeService(state);
+
+    await expect(
+      service.linkWallet(USER_ID, pollarCustodialDto({ pollar_user_id: 'someone-elses-id' })),
+    ).rejects.toThrow(/pollar_user_id does not match/);
+    expect(state.inserts).toHaveLength(0);
+  });
+
+  it('refuses a custodial wallet the authenticated user did not log in with', async () => {
+    const state: MockState = {
+      authUserWallet: 'GOTHERADDRESS',
+      authUserPollarId: POLLAR_USER_ID,
+      inserts: [],
+      updates: [],
+    };
+    const service = makeService(state);
+
+    await expect(service.linkWallet(USER_ID, pollarCustodialDto())).rejects.toThrow(
+      /Pollar wallet does not match/,
+    );
+    expect(state.inserts).toHaveLength(0);
+  });
+
+  it('refuses a Pollar id when the account has none recorded', async () => {
+    // No pollar_user_id on auth_users means no Pollar login ever proved one, so
+    // there is nothing to check the claim against and it cannot be accepted.
+    const state: MockState = { authUserWallet: G_ADDRESS, inserts: [], updates: [] };
+    const service = makeService(state);
+
+    await expect(service.linkWallet(USER_ID, pollarCustodialDto())).rejects.toThrow(
+      /pollar_user_id does not match/,
+    );
+  });
+
+  it("refuses an external wallet claiming another user's Pollar id", async () => {
+    const state: MockState = {
+      authUserWallet: G_ADDRESS,
+      authUserPollarId: POLLAR_USER_ID,
+      inserts: [],
+      updates: [],
+    };
+    const service = makeService(state);
+
+    await expect(
+      service.linkWallet(USER_ID, pollarExternalDto({ pollar_user_id: 'someone-elses-id' })),
+    ).rejects.toThrow(/pollar_user_id does not match/);
+    expect(state.inserts).toHaveLength(0);
+  });
+
+  it('refuses an Accesly provider on a custodial wallet', async () => {
+    // An Accesly wallet links as wallet_type 'accesly', where c_address and the
+    // address check are required; claiming the provider on a custodial row skips
+    // both and asserts an origin the wallet does not have.
+    const state: MockState = { authUserWallet: G_ADDRESS, inserts: [], updates: [] };
+    const service = makeService(state);
+
+    await expect(
+      service.linkWallet(
+        USER_ID,
+        pollarCustodialDto({ auth_provider: 'accesly', pollar_user_id: undefined }),
+      ),
+    ).rejects.toThrow(/requires wallet_type 'accesly'/);
+    expect(state.inserts).toHaveLength(0);
+  });
+});
+
 describe('WalletsService.linkWallet — wallet authenticated through Pollar (#108)', () => {
   it("accepts Pollar's proof instead of a SEP-0043 signature", async () => {
-    const state: MockState = { authUserWallet: G_ADDRESS, inserts: [], updates: [] };
+    const state: MockState = {
+      authUserWallet: G_ADDRESS,
+      authUserPollarId: POLLAR_USER_ID,
+      inserts: [],
+      updates: [],
+    };
     const service = makeService(state);
 
     const { wallet, error } = await service.linkWallet(USER_ID, pollarExternalDto());
@@ -118,7 +238,7 @@ describe('WalletsService.linkWallet — wallet authenticated through Pollar (#10
       wallet_address: G_ADDRESS,
       wallet_type: 'freighter',
       auth_provider: 'pollar',
-      pollar_user_id: 'cms7zi5yd00930ilc8vx3nf4u',
+      pollar_user_id: POLLAR_USER_ID,
       is_verified: true,
     });
   });
@@ -244,17 +364,18 @@ describe('WalletsService.linkWallet — accesly identity (#109)', () => {
     // a console.warn as the only trace.
     const state: MockState = {
       authUserWallet: G_ADDRESS,
+      authUserPollarId: POLLAR_USER_ID,
       missingColumns: ['pollar_user_id'],
       inserts: [],
       updates: [],
     };
     const service = makeService(state);
 
-    const { wallet, error } = await service.linkWallet(USER_ID, pollarExternalDto());
+    const { wallet, error } = await service.linkWallet(USER_ID, pollarCustodialDto());
 
     expect(error).toBeNull();
     expect(state.inserts).toHaveLength(2);
-    expect(state.inserts[0]).toHaveProperty('pollar_user_id');
+    expect(state.inserts[0]).toHaveProperty('pollar_user_id', POLLAR_USER_ID);
     expect(state.inserts[1]).not.toHaveProperty('pollar_user_id');
     expect(state.inserts[1]).toHaveProperty('auth_provider', 'pollar');
     expect(wallet).toMatchObject({ auth_provider: 'pollar' });

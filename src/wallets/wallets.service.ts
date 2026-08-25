@@ -199,6 +199,66 @@ export class WalletsService {
   /**
    * Link a new wallet to a user
    */
+  /**
+   * The identity this account actually proved, read from auth_users instead of
+   * taken from the request. POST /v1/wallets never sees a Pollar token — only a
+   * Thalos JWT, which says who the caller is and nothing whatsoever about Pollar
+   * — so the login's own record is the only thing here worth trusting.
+   */
+  private async readVerifiedIdentity(
+    userId: string,
+  ): Promise<{ walletPublicKey: string | null; pollarUserId: string | null }> {
+    const { data, error } = await this.supabase
+      .getClient()
+      .from('auth_users')
+      .select('wallet_public_key, pollar_user_id')
+      .eq('id', userId)
+      .maybeSingle();
+
+    // Letting this fall through would report a database failure as a mismatch:
+    // no row comes back, so every comparison below fails and the caller is told
+    // their wallet is not theirs, about a comparison that never happened.
+    if (error) {
+      throw new InternalServerErrorException('Could not read the authenticated identity');
+    }
+
+    const row = data as {
+      wallet_public_key?: string | null;
+      pollar_user_id?: string | null;
+    } | null;
+    return {
+      walletPublicKey: row?.wallet_public_key ?? null,
+      pollarUserId: row?.pollar_user_id ?? null,
+    };
+  }
+
+  /**
+   * Both halves of a Pollar claim, checked against what the login wrote.
+   *
+   * /api/auth/pollar verifies the Pollar token, writes wallet_public_key and
+   * pollar_user_id onto auth_users, and only then mints the JWT — so by the time
+   * a request reaches here, the truth is already in the row. Re-deriving it from
+   * the body would just be asking the caller to grade their own homework.
+   */
+  private async assertPollarOwnership(
+    userId: string,
+    walletAddress: string,
+    claimedPollarUserId: string,
+  ): Promise<void> {
+    const { walletPublicKey, pollarUserId } = await this.readVerifiedIdentity(userId);
+
+    if (walletPublicKey !== walletAddress) {
+      throw new ForbiddenException('Pollar wallet does not match the authenticated user');
+    }
+    // The address alone is not enough. Without this, any account could attach
+    // someone else's Pollar id to a wallet it does own, and the reverse lookup
+    // scripts/013 adds its index for — "find the wallet for this Pollar user" —
+    // would answer with the wrong person.
+    if (!pollarUserId || pollarUserId !== claimedPollarUserId) {
+      throw new ForbiddenException('pollar_user_id does not match the authenticated user');
+    }
+  }
+
   async linkWallet(
     userId: string,
     dto: LinkWalletDto,
@@ -253,6 +313,24 @@ export class WalletsService {
       if (authProvider === 'pollar' && !pollarUserId) {
         throw new BadRequestException("auth_provider 'pollar' requires pollar_user_id");
       }
+
+      // An Accesly wallet is a passkey smart account and links as wallet_type
+      // 'accesly', which is where its c_address and its ownership proof are
+      // required. Recording the provider on a custodial row would claim an
+      // Accesly origin for a wallet that went through none of that.
+      if (authProvider === 'accesly') {
+        throw new BadRequestException("auth_provider 'accesly' requires wallet_type 'accesly'");
+      }
+
+      // 'custodial' is Pollar's main path (wallet.type 'internal') and the one
+      // branch that proves nothing — it auto-verifies. Harmless while the row
+      // says nothing about who the user is; not harmless once it names a Pollar
+      // identity, which is precisely what this endpoint cannot take on trust.
+      // Checking wallet_type first is what made this reachable: the same request
+      // as 'freighter' was refused, and as 'custodial' it was stored.
+      if (authProvider === 'pollar' && pollarUserId) {
+        await this.assertPollarOwnership(userId, dto.wallet_address, pollarUserId);
+      }
     } else if (dto.wallet_type === 'accesly') {
       // Accesly (passkey smart account, #109) can't produce a classic SEP-0043
       // wallet signature here, but ownership of the G-address was already
@@ -300,21 +378,7 @@ export class WalletsService {
         throw new BadRequestException("auth_provider 'pollar' requires pollar_user_id");
       }
 
-      const { data: authUser, error: authUserError } = await this.supabase
-        .getClient()
-        .from('auth_users')
-        .select('wallet_public_key')
-        .eq('id', userId)
-        .maybeSingle();
-      // Without this the row simply comes back null and the check below reports a
-      // database failure as 'your wallet does not match' — a 403 for something the
-      // caller did not do, and nothing was ever read to compare against.
-      if (authUserError) {
-        throw new InternalServerErrorException('Could not read the authenticated wallet');
-      }
-      if (authUser?.wallet_public_key !== dto.wallet_address) {
-        throw new ForbiddenException('Pollar wallet does not match the authenticated user');
-      }
+      await this.assertPollarOwnership(userId, dto.wallet_address, dto.pollar_user_id);
 
       isVerified = true;
       verifiedAt = new Date().toISOString();
