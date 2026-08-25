@@ -32,6 +32,7 @@ WHERE au.wallet_public_key IS NOT NULL
 INSERT INTO public.user_wallets (
   user_id,
   wallet_address,
+  wallet_type,
   label,
   is_primary,
   is_verified,
@@ -40,6 +41,17 @@ INSERT INTO public.user_wallets (
 SELECT
   au.id,
   au.wallet_public_key,
+  -- wallet_type was missing from this list, and 001 declares it NOT NULL with no
+  -- default, so the statement aborted with 23502 and backfilled nothing — on a
+  -- database with rows to migrate, which is the only kind this script is for.
+  --
+  -- 'other' rather than 'custodial': auth_users.wallet_public_key is written by
+  -- every login path, so a legacy row may hold a wallet the user connected
+  -- themselves, and claiming custody of it would be wrong. 'custodial' also
+  -- makes the row undeletable (WalletsService.removeWallet refuses to remove a
+  -- custodial wallet), which is not a decision a backfill should make for a
+  -- wallet whose origin it cannot determine.
+  'other',
   'Wallet principal',
   -- Only claim primary if the user has no primary wallet yet; the partial
   -- unique index idx_user_wallets_primary allows exactly one per user.
