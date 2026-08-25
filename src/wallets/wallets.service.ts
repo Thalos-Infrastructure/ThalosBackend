@@ -223,9 +223,10 @@ export class WalletsService {
     let isVerified: boolean;
     let verifiedAt: string | null;
 
-    // Identity provider only applies to provisioned (custodial) wallets. An
-    // external wallet is connected by its owner, so accepting an auth_provider
-    // for one would record an origin that never happened.
+    // Resolved per wallet_type below. A wallet connected by its owner in the
+    // browser has no identity provider, so accepting one for it would record an
+    // origin that never happened; the only external wallet that carries one is a
+    // wallet Pollar itself authenticated.
     let authProvider: AuthProvider | null = null;
     let pollarUserId: string | null = null;
 
@@ -255,6 +256,17 @@ export class WalletsService {
       if (!dto.c_address) {
         throw new BadRequestException('c_address is required for accesly wallets');
       }
+
+      // The passkey login provisioned this wallet, so wallet_type already names
+      // the provider. Echoing 'accesly' back is fine, but any other provider —
+      // or a Pollar user id — describes an origin this wallet does not have.
+      // Refuse it rather than silently overwrite what the caller sent.
+      if (dto.auth_provider && dto.auth_provider !== 'accesly') {
+        throw new BadRequestException("auth_provider must be 'accesly' for an accesly wallet");
+      }
+      if (dto.pollar_user_id) {
+        throw new BadRequestException('pollar_user_id is not valid for an accesly wallet');
+      }
       const { data: authUser } = await this.supabase
         .getClient()
         .from('auth_users')
@@ -267,9 +279,7 @@ export class WalletsService {
       isVerified = true;
       verifiedAt = new Date().toISOString();
 
-      // An Accesly wallet is provisioned by the passkey login, so wallet_type
-      // already names the provider. dto.auth_provider may echo it but cannot
-      // change it — a row saying 'accesly' with any other provider would lie.
+      // Guarded above: whatever the caller sent agrees with this or was refused.
       authProvider = 'accesly';
       pollarUserId = null;
     } else if (dto.auth_provider === 'pollar') {

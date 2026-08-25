@@ -11,7 +11,7 @@ import {
 export type WalletType =
   'custodial' | 'freighter' | 'lobstr' | 'xbull' | 'albedo' | 'accesly' | 'other';
 
-/** Identity provider behind a custodial wallet. External wallets carry none. */
+/** The login that produced or authenticated a wallet. */
 export type AuthProvider = 'pollar' | 'accesly';
 
 export class LinkWalletDto {
@@ -35,10 +35,11 @@ export class LinkWalletDto {
   signature?: string; // For verification
 
   /**
-   * Which login produced this wallet (#108 social/email via Pollar, #109 passkey
-   * via Accesly). Only meaningful for provisioned wallets — 'custodial' or
-   * 'accesly'; an external wallet is connected, not provisioned, so it has no
-   * identity provider.
+   * Which login this wallet came through (#108 Pollar, #109 Accesly passkey).
+   * Set it when a login provisioned the wallet ('custodial', 'accesly') or, for
+   * 'pollar' only, when the user signed in with a wallet they already had and
+   * Pollar proved ownership. A wallet connected by its owner in the browser has
+   * no identity provider, and passing one for it is rejected.
    */
   @IsOptional()
   @IsString()

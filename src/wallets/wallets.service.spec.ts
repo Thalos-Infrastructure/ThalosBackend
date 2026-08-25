@@ -173,6 +173,39 @@ describe('WalletsService.linkWallet — accesly identity (#109)', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('refuses an accesly wallet that claims a different provider', async () => {
+    const state: MockState = { authUserWallet: G_ADDRESS, inserts: [], updates: [] };
+    const service = makeService(state);
+
+    await expect(
+      service.linkWallet(USER_ID, acceslyDto({ auth_provider: 'pollar' })),
+    ).rejects.toThrow(/auth_provider must be 'accesly'/);
+    expect(state.inserts).toHaveLength(0);
+  });
+
+  it('refuses a pollar_user_id on an accesly wallet', async () => {
+    const state: MockState = { authUserWallet: G_ADDRESS, inserts: [], updates: [] };
+    const service = makeService(state);
+
+    await expect(
+      service.linkWallet(USER_ID, acceslyDto({ pollar_user_id: 'cms7zi5yd00930ilc8vx3nf4u' })),
+    ).rejects.toThrow(/pollar_user_id is not valid/);
+    expect(state.inserts).toHaveLength(0);
+  });
+
+  it('accepts an accesly wallet that echoes its own provider back', async () => {
+    const state: MockState = { authUserWallet: G_ADDRESS, inserts: [], updates: [] };
+    const service = makeService(state);
+
+    const { wallet, error } = await service.linkWallet(
+      USER_ID,
+      acceslyDto({ auth_provider: 'accesly' }),
+    );
+
+    expect(error).toBeNull();
+    expect(wallet).toMatchObject({ auth_provider: 'accesly' });
+  });
+
   it('rejects an accesly link when the G-address does not match the JWT user wallet', async () => {
     const state: MockState = { authUserWallet: 'GOTHERWALLET', inserts: [], updates: [] };
     const service = makeService(state);
