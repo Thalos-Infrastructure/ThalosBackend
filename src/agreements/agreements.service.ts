@@ -47,18 +47,6 @@ export class AgreementsService {
     }
   }
 
-  /** Perfil opcional vinculado por wallet (tabla profiles). */
-  private async profileIdByWallet(wallet: string): Promise<string | null> {
-    const { data, error } = await this.supabase
-      .getClient()
-      .from('profiles')
-      .select('id')
-      .eq('wallet_address', wallet)
-      .maybeSingle();
-    if (error || !data?.id) return null;
-    return data.id as string;
-  }
-
   private async assertCanAccessAgreement(userId: string, agreementId: string): Promise<void> {
     const client = this.supabase.getClient();
 
@@ -84,8 +72,6 @@ export class AgreementsService {
 
     await this.assertActorWallet(userId, dto.created_by);
 
-    const createdByProfileId = await this.profileIdByWallet(dto.created_by);
-
     const agreementRow: Record<string, unknown> = {
       contract_id: dto.contract_id ?? null,
       title: dto.title,
@@ -98,9 +84,6 @@ export class AgreementsService {
       metadata: dto.metadata ?? {},
       created_by: dto.created_by,
     };
-    if (createdByProfileId) {
-      agreementRow.created_by_profile_id = createdByProfileId;
-    }
 
     const { data: agreement, error: agreementError } = await this.supabase
       .getClient()
@@ -113,18 +96,15 @@ export class AgreementsService {
       return { agreement: null, error: agreementError.message };
     }
 
-    const participants = await Promise.all(
-      dto.participants.map(async (p) => {
-        const row: Record<string, unknown> = {
-          agreement_id: agreement.id,
-          wallet_address: p.wallet_address,
-          role: p.role,
-        };
-        const pid = p.profile_id ?? (await this.profileIdByWallet(p.wallet_address));
-        if (pid) row.profile_id = pid;
-        return row;
-      }),
-    );
+    // NOTE: participants are keyed by wallet only. An earlier version also wrote a
+    // denormalised `profile_id` here (and `created_by_profile_id` on the agreement),
+    // but neither column exists in the database and nothing ever read them — so every
+    // agreement whose creator or participant HAD a profile failed to insert.
+    const participants = dto.participants.map((p) => ({
+      agreement_id: agreement.id,
+      wallet_address: p.wallet_address,
+      role: p.role,
+    }));
 
     const { error: participantsError } = await this.supabase
       .getClient()
