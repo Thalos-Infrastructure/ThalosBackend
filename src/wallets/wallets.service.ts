@@ -33,10 +33,17 @@ export interface UserWallet {
   is_primary: boolean;
   is_verified: boolean;
   verified_at: string | null;
-  /** Identity provider that produced a provisioned wallet; null for external ones. */
-  auth_provider: AuthProvider | null;
-  /** Pollar user id when auth_provider is 'pollar'; null otherwise. */
-  pollar_user_id: string | null;
+  /**
+   * Identity provider that produced a provisioned wallet; null for external ones.
+   * Optional, not merely nullable: the key is absent from rows read before 008/013
+   * are applied and from the row the PGRST204 fallback below writes, so declaring
+   * it required would have `data as UserWallet` assert a field that is not there.
+   * The column itself is free text (008); this union is what LinkWalletDto admits,
+   * and LinkWalletDto is its only writer.
+   */
+  auth_provider?: AuthProvider | null;
+  /** Pollar user id when auth_provider is 'pollar'. Optional for the same reason. */
+  pollar_user_id?: string | null;
   /** Soroban Smart Account address (C…); wallet_address holds the G-address. */
   c_address?: string | null;
   created_at: string;
@@ -293,12 +300,18 @@ export class WalletsService {
         throw new BadRequestException("auth_provider 'pollar' requires pollar_user_id");
       }
 
-      const { data: authUser } = await this.supabase
+      const { data: authUser, error: authUserError } = await this.supabase
         .getClient()
         .from('auth_users')
         .select('wallet_public_key')
         .eq('id', userId)
         .maybeSingle();
+      // Without this the row simply comes back null and the check below reports a
+      // database failure as 'your wallet does not match' — a 403 for something the
+      // caller did not do, and nothing was ever read to compare against.
+      if (authUserError) {
+        throw new InternalServerErrorException('Could not read the authenticated wallet');
+      }
       if (authUser?.wallet_public_key !== dto.wallet_address) {
         throw new ForbiddenException('Pollar wallet does not match the authenticated user');
       }

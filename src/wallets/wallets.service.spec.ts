@@ -1,4 +1,8 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ApiClient } from '../common/api/api-client';
@@ -12,6 +16,8 @@ const C_ADDRESS = 'CCV4UYUFZBD5CZDXZTZU47VFLWPKWRJLEWDICJAUNRZLETX63GJ4UAHW';
 interface MockState {
   /** auth_users.wallet_public_key for USER_ID (undefined = no row). */
   authUserWallet?: string;
+  /** The auth_users lookup fails instead of returning a row. */
+  authUserQueryFails?: boolean;
   /** First user_wallets insert fails with PGRST204 (identity columns missing). */
   failFirstInsertWithPgrst204?: boolean;
   inserts: Record<string, unknown>[];
@@ -38,6 +44,12 @@ function makeSupabase(state: MockState): SupabaseService {
         neq: () => builder,
         maybeSingle: () => {
           if (table === 'auth_users') {
+            if (state.authUserQueryFails) {
+              return Promise.resolve({
+                data: null,
+                error: { code: '08006', message: 'connection failure' },
+              });
+            }
             return Promise.resolve({
               data:
                 state.authUserWallet === undefined
@@ -123,6 +135,18 @@ describe('WalletsService.linkWallet — wallet authenticated through Pollar (#10
     await expect(service.linkWallet(USER_ID, pollarExternalDto())).rejects.toThrow(
       /does not match the authenticated user/,
     );
+  });
+
+  it('reports a failed auth_users lookup as a server error, not as a mismatch', async () => {
+    // Discarding the query error would surface a database failure as 403 'does
+    // not match', blaming the caller for something they did not do.
+    const state: MockState = { authUserQueryFails: true, inserts: [], updates: [] };
+    const service = makeService(state);
+
+    await expect(service.linkWallet(USER_ID, pollarExternalDto())).rejects.toBeInstanceOf(
+      InternalServerErrorException,
+    );
+    expect(state.inserts).toHaveLength(0);
   });
 
   it('refuses to record a Pollar provider without the Pollar user id', async () => {
