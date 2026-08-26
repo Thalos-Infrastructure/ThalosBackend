@@ -78,7 +78,7 @@ because there the caller names a specific wallet and must prove it owns it.
 
 ## Indexes
 
-`scripts/018_agreements_filter_indexes.sql` covers the scoping columns
+`scripts/015_agreements_filter_indexes.sql` covers the scoping columns
 (`agreements.created_by`, `agreement_participants.wallet_address`), the two
 filter columns, the `(status, agreement_type)` pair, and `created_at DESC` for
 the ordering.
