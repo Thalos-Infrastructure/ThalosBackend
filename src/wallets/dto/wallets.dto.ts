@@ -11,6 +11,9 @@ import {
 export type WalletType =
   'custodial' | 'freighter' | 'lobstr' | 'xbull' | 'albedo' | 'accesly' | 'other';
 
+/** The login that produced or authenticated a wallet. */
+export type AuthProvider = 'pollar' | 'accesly';
+
 export class LinkWalletDto {
   @IsString()
   wallet_address: string;
@@ -31,10 +34,22 @@ export class LinkWalletDto {
   @IsString()
   signature?: string; // For verification
 
-  /** Login method that produced this wallet ('accesly', 'pollar', …). #108/#109 */
+  /**
+   * Which login this wallet came through (#108 Pollar, #109 Accesly passkey).
+   * Set it when a login provisioned the wallet ('custodial', 'accesly') or, for
+   * 'pollar' only, when the user signed in with a wallet they already had and
+   * Pollar proved ownership. A wallet connected by its owner in the browser has
+   * no identity provider, and passing one for it is rejected.
+   */
   @IsOptional()
   @IsString()
-  auth_provider?: string;
+  @IsIn(['pollar', 'accesly'])
+  auth_provider?: AuthProvider;
+
+  /** Pollar user id owning the wallet, when `auth_provider` is 'pollar'. */
+  @IsOptional()
+  @IsString()
+  pollar_user_id?: string;
 
   /**
    * Smart Account contract address (C…). wallet_address stays the G-address.
