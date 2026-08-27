@@ -233,9 +233,13 @@ export class KycService {
     if (error) {
       this.logger.error(`Failed to update KYC status from webhook: ${error.message}`);
     } else if (!data || data.length === 0) {
-      this.logger.warn(`Webhook processed for unknown provider reference: ${providerVerificationId}`);
+      this.logger.warn(
+        `Webhook processed for unknown provider reference: ${providerVerificationId}`,
+      );
     } else {
-      this.logger.log(`Webhook updated KYC status to ${mappedStatus} for reference: ${providerVerificationId}`);
+      this.logger.log(
+        `Webhook updated KYC status to ${mappedStatus} for reference: ${providerVerificationId}`,
+      );
     }
   }
 }
