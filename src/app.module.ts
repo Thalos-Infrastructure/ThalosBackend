@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { CommonModule } from './common/common.module';
 import { AuthModule } from './auth/auth.module';
 import { SupabaseModule } from './supabase/supabase.module';
@@ -19,12 +20,17 @@ import { WebhooksModule } from './webhooks/webhooks.module';
 import { RetryQueueModule } from './retry-queue/retry-queue.module';
 import { VerificationModule } from './verification/verification.module';
 import { KybModule } from './kyb/kyb.module';
+import { KycModule } from './kyc/kyc.module';
 import { IdentityProvidersModule } from './identity-providers/identity-providers.module';
+import { OpportunitiesModule } from './opportunities/opportunities.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env.local', '.env'] }),
     EventEmitterModule.forRoot(),
+    // Only applied where a controller opts in with `@UseGuards(ThrottlerGuard)`
+    // — currently the `@Public()` escrow reads. Authenticated routes are unchanged.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 30 }]),
     CommonModule,
     SupabaseModule,
     AuthModule,
@@ -42,7 +48,9 @@ import { IdentityProvidersModule } from './identity-providers/identity-providers
     WebhooksModule,
     VerificationModule,
     KybModule,
+    KycModule,
     IdentityProvidersModule,
+    OpportunitiesModule,
   ],
   controllers: [RootController],
 })

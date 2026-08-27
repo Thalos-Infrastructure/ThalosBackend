@@ -316,9 +316,47 @@ describe('WebhooksService.handleEvent — milestone updates', () => {
     const result = await runHandleEventAndProcess(svc, {
       event: 'escrow.milestone_updated',
       contractId: 'c-1',
+      milestone: { index: 0, status: 'approved' },
+    });
+    expect(result).toEqual({ handled: true });
+  });
+
+  it('escrow.milestone_updated: normalizes legacy TW status "completed" → "released"', async () => {
+    const updateClientMock = milestoneUpdateClient();
+    const svc = buildService({
+      getClientCalls: [milestoneSelectClient(agreementData), updateClientMock, insertClient()],
+    });
+    const result = await runHandleEventAndProcess(svc, {
+      event: 'escrow.milestone_updated',
+      contractId: 'c-1',
       milestone: { index: 0, status: 'completed' },
     });
     expect(result).toEqual({ handled: true });
+    expect(updateClientMock.update).toHaveBeenCalledWith({
+      milestones: [
+        { description: 'First milestone', amount: '50', status: 'released' },
+        { description: 'Second milestone', amount: '50', status: 'pending' },
+      ],
+      updated_at: expect.any(String),
+    });
+  });
+
+  it('escrow.milestone_updated: does not persist an unknown TW status', async () => {
+    const updateClientMock = milestoneUpdateClient();
+    const svc = buildService({
+      getClientCalls: [milestoneSelectClient(agreementData), updateClientMock, insertClient()],
+    });
+
+    await runHandleEventAndProcess(svc, {
+      event: 'escrow.milestone_updated',
+      contractId: 'c-1',
+      milestone: { index: 0, status: 'mystery_status' },
+    });
+
+    expect(updateClientMock.update).toHaveBeenCalledWith({
+      milestones: agreementData.milestones,
+      updated_at: expect.any(String),
+    });
   });
 
   it('agreement.milestone_updated: updates milestone status', async () => {

@@ -43,6 +43,24 @@ export interface MilestoneApprovedData {
   approvedByName?: string;
 }
 
+/**
+ * Payload emitted with AGREEMENT_EVENTS.MILESTONE_RELEASED when escrow funds
+ * for a milestone are released on-chain.
+ */
+export interface MilestoneReleasedData {
+  agreementId: string;
+  agreementTitle: string;
+  milestoneIndex: number;
+  milestoneDescription: string;
+  milestoneAmount: string;
+  asset: string;
+  contractId?: string;
+  serviceType?: string;
+  actorWallet: string;
+  actorName?: string;
+  evidence?: string;
+}
+
 export interface DisputeOpenedData {
   agreementId: string;
   agreementTitle: string;

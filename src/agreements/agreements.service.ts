@@ -8,6 +8,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SupabaseService } from '../supabase/supabase.service';
 import { CreateAgreementDto } from './dto/create-agreement.dto';
 import { LinkContractDto } from './dto/link-contract.dto';
+import { ListAgreementsQueryDto } from './dto/list-agreements.dto';
 import { UpdateAgreementStatusDto } from './dto/update-status.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
 import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
@@ -16,6 +17,7 @@ import { validateAgreement, validateAgreementConsistency } from './agreement.val
 import { AgreementActivityService } from './agreement-activity.service';
 import { AgreementSyncService } from './sync/agreement-sync.service';
 import { AgreementValidationService } from './validation/agreement-validation.service';
+import { resolveUserWallets, userCanAccessAgreement } from '../common/wallets/resolve-user-wallets';
 
 @Injectable()
 export class AgreementsService {
@@ -27,27 +29,21 @@ export class AgreementsService {
     private readonly validation: AgreementValidationService,
   ) {}
 
-  private async walletForUserId(userId: string): Promise<string | null> {
-    const { data, error } = await this.supabase
-      .getClient()
-      .from('auth_users')
-      .select('wallet_public_key')
-      .eq('id', userId)
-      .maybeSingle();
-    if (error || !data?.wallet_public_key) return null;
-    return data.wallet_public_key as string;
+  /** Every wallet the authenticated user owns (see resolve-user-wallets). */
+  private async walletsForUserId(userId: string): Promise<string[]> {
+    return resolveUserWallets(this.supabase.getClient(), userId);
   }
 
   private async assertActorWallet(userId: string, actorWallet: string) {
-    const w = await this.walletForUserId(userId);
-    if (!w) {
+    const wallets = await this.walletsForUserId(userId);
+    if (wallets.length === 0) {
       throw new ForbiddenException(
-        'No hay wallet en auth_users para este usuario (wallet_public_key vacío o usuario no encontrado). Revisá Supabase y que Nest use el mismo proyecto (SUPABASE_URL).',
+        'No hay wallet asociada a este usuario (ni en user_wallets ni en auth_users.wallet_public_key). Revisá Supabase y que Nest use el mismo proyecto (SUPABASE_URL).',
       );
     }
-    if (w !== actorWallet) {
+    if (!wallets.includes(actorWallet)) {
       throw new ForbiddenException(
-        'created_by debe ser exactamente auth_users.wallet_public_key del usuario del JWT (misma cadena G...).',
+        'created_by debe ser una de las wallets vinculadas al usuario del JWT (misma cadena G...).',
       );
     }
   }
@@ -65,11 +61,9 @@ export class AgreementsService {
   }
 
   private async assertCanAccessAgreement(userId: string, agreementId: string): Promise<void> {
-    const wallet = await this.walletForUserId(userId);
-    if (!wallet) throw new ForbiddenException('No wallet on profile');
+    const client = this.supabase.getClient();
 
-    const { data: agreement, error: aErr } = await this.supabase
-      .getClient()
+    const { data: agreement, error: aErr } = await client
       .from('agreements')
       .select('id, created_by')
       .eq('id', agreementId)
@@ -77,16 +71,8 @@ export class AgreementsService {
     if (aErr || !agreement) throw new NotFoundException('Agreement not found');
 
     const createdBy = (agreement as { created_by: string }).created_by;
-    if (createdBy === wallet || createdBy === userId) return;
-
-    const { data: parts } = await this.supabase
-      .getClient()
-      .from('agreement_participants')
-      .select('wallet_address')
-      .eq('agreement_id', agreementId)
-      .eq('wallet_address', wallet)
-      .limit(1);
-    if (!parts?.length) {
+    const allowed = await userCanAccessAgreement(client, userId, agreementId, createdBy);
+    if (!allowed) {
       throw new ForbiddenException('Not a participant of this agreement');
     }
   }
@@ -464,28 +450,30 @@ export class AgreementsService {
     return { success: true, error: null };
   }
 
-  async listByWallet(userId: string, wallet: string) {
-    await this.assertActorWallet(userId, wallet);
+  /**
+   * Ids of every agreement reachable from `wallets`, as creator or participant.
+   * Supabase failures come back as a message instead of throwing, so callers
+   * keep returning the `{ agreements, error }` envelope.
+   */
+  private async agreementIdsForWallets(
+    wallets: string[],
+  ): Promise<{ ids: string[]; error: string | null }> {
+    if (wallets.length === 0) return { ids: [], error: null };
+    const client = this.supabase.getClient();
 
-    const { data: participations, error: partError } = await this.supabase
-      .getClient()
+    const { data: participations, error: partError } = await client
       .from('agreement_participants')
       .select('agreement_id')
-      .eq('wallet_address', wallet);
+      .in('wallet_address', wallets);
 
-    if (partError) {
-      return { agreements: [], error: partError.message };
-    }
+    if (partError) return { ids: [], error: partError.message };
 
-    const { data: createdRows, error: createdError } = await this.supabase
-      .getClient()
+    const { data: createdRows, error: createdError } = await client
       .from('agreements')
       .select('id')
-      .eq('created_by', wallet);
+      .in('created_by', wallets);
 
-    if (createdError) {
-      return { agreements: [], error: createdError.message };
-    }
+    if (createdError) return { ids: [], error: createdError.message };
 
     const idSet = new Set<string>();
     participations?.forEach((p) => {
@@ -495,20 +483,54 @@ export class AgreementsService {
       if (r.id) idSet.add(r.id as string);
     });
 
-    if (idSet.size === 0) {
-      return { agreements: [], error: null };
-    }
+    return { ids: [...idSet], error: null };
+  }
 
-    const ids = [...idSet];
-    const { data: agreements, error: agError } = await this.supabase
-      .getClient()
-      .from('agreements')
-      .select('*')
-      .in('id', ids)
-      .order('created_at', { ascending: false });
+  /** Full agreement rows for `ids`, newest first, narrowed by the optional filters. */
+  private async fetchAgreementsByIds(
+    ids: string[],
+    filters: { status?: string; agreementType?: string } = {},
+  ) {
+    if (ids.length === 0) return { agreements: [], error: null };
 
-    if (agError) return { agreements: [], error: agError.message };
-    return { agreements: agreements ?? [], error: null };
+    let query = this.supabase.getClient().from('agreements').select('*').in('id', ids);
+    if (filters.status) query = query.eq('status', filters.status);
+    if (filters.agreementType) query = query.eq('agreement_type', filters.agreementType);
+
+    const { data, error } = await query.order('created_at', { ascending: false });
+
+    if (error) return { agreements: [], error: error.message };
+    return { agreements: data ?? [], error: null };
+  }
+
+  /**
+   * Every agreement the authenticated user can see — across all wallets they
+   * own, not just the active one — optionally narrowed by status and type.
+   *
+   * A user with no linked wallet lists empty rather than 403: having nothing to
+   * show is not an authorization failure. `listByWallet` still rejects, because
+   * there the caller names a specific wallet and must prove it owns it.
+   */
+  async list(userId: string, query: ListAgreementsQueryDto = {}) {
+    const wallets = await this.walletsForUserId(userId);
+    if (wallets.length === 0) return { agreements: [], error: null };
+
+    const { ids, error } = await this.agreementIdsForWallets(wallets);
+    if (error) return { agreements: [], error };
+
+    return this.fetchAgreementsByIds(ids, {
+      status: query.status,
+      agreementType: query.type,
+    });
+  }
+
+  async listByWallet(userId: string, wallet: string) {
+    await this.assertActorWallet(userId, wallet);
+
+    const { ids, error } = await this.agreementIdsForWallets([wallet]);
+    if (error) return { agreements: [], error };
+
+    return this.fetchAgreementsByIds(ids);
   }
 
   async getById(userId: string, agreementId: string) {

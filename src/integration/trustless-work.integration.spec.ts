@@ -3,6 +3,7 @@ import * as crypto from 'crypto';
 import { ValidationPipe } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test } from '@nestjs/testing';
 import * as jwt from 'jsonwebtoken';
@@ -386,7 +387,9 @@ describe('Trustless Work end-to-end integration', () => {
     retryQueue = new InMemoryRetryQueue();
 
     const moduleRef = await Test.createTestingModule({
-      imports: [AuthModule],
+      // EscrowsController throttles its @Public() reads, so the guard needs the
+      // throttler options. A high limit keeps the suite from tripping a 429.
+      imports: [AuthModule, ThrottlerModule.forRoot([{ ttl: 60_000, limit: 1000 }])],
       controllers: [AgreementsController, EscrowsController, WebhooksController],
       providers: [
         AgreementsService,

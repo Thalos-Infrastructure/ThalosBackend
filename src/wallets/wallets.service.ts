@@ -10,7 +10,13 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ApiClient } from '../common/api/api-client';
-import { LinkWalletDto, UpdateWalletDto, VerifyWalletDto, WalletType } from './dto/wallets.dto';
+import {
+  AuthProvider,
+  LinkWalletDto,
+  UpdateWalletDto,
+  VerifyWalletDto,
+  WalletType,
+} from './dto/wallets.dto';
 import {
   WALLET_OWNERSHIP_PREFIX,
   networkPassphrase,
@@ -27,12 +33,21 @@ export interface UserWallet {
   is_primary: boolean;
   is_verified: boolean;
   verified_at: string | null;
-  created_at: string;
-  updated_at: string;
-  /** Login method that produced this wallet ('accesly', 'pollar', …). #108/#109 */
-  auth_provider?: string | null;
+  /**
+   * Identity provider that produced a provisioned wallet; null for external ones.
+   * Optional, not merely nullable: the key is absent from rows read before 008/013
+   * are applied and from the row the PGRST204 fallback below writes, so declaring
+   * it required would have `data as UserWallet` assert a field that is not there.
+   * The column itself is free text (008); this union is what LinkWalletDto admits,
+   * and LinkWalletDto is its only writer.
+   */
+  auth_provider?: AuthProvider | null;
+  /** Pollar user id when auth_provider is 'pollar'. Optional for the same reason. */
+  pollar_user_id?: string | null;
   /** Soroban Smart Account address (C…); wallet_address holds the G-address. */
   c_address?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface WalletWithBalance extends UserWallet {
@@ -184,6 +199,66 @@ export class WalletsService {
   /**
    * Link a new wallet to a user
    */
+  /**
+   * The identity this account actually proved, read from auth_users instead of
+   * taken from the request. POST /v1/wallets never sees a Pollar token — only a
+   * Thalos JWT, which says who the caller is and nothing whatsoever about Pollar
+   * — so the login's own record is the only thing here worth trusting.
+   */
+  private async readVerifiedIdentity(
+    userId: string,
+  ): Promise<{ walletPublicKey: string | null; pollarUserId: string | null }> {
+    const { data, error } = await this.supabase
+      .getClient()
+      .from('auth_users')
+      .select('wallet_public_key, pollar_user_id')
+      .eq('id', userId)
+      .maybeSingle();
+
+    // Letting this fall through would report a database failure as a mismatch:
+    // no row comes back, so every comparison below fails and the caller is told
+    // their wallet is not theirs, about a comparison that never happened.
+    if (error) {
+      throw new InternalServerErrorException('Could not read the authenticated identity');
+    }
+
+    const row = data as {
+      wallet_public_key?: string | null;
+      pollar_user_id?: string | null;
+    } | null;
+    return {
+      walletPublicKey: row?.wallet_public_key ?? null,
+      pollarUserId: row?.pollar_user_id ?? null,
+    };
+  }
+
+  /**
+   * Both halves of a Pollar claim, checked against what the login wrote.
+   *
+   * /api/auth/pollar verifies the Pollar token, writes wallet_public_key and
+   * pollar_user_id onto auth_users, and only then mints the JWT — so by the time
+   * a request reaches here, the truth is already in the row. Re-deriving it from
+   * the body would just be asking the caller to grade their own homework.
+   */
+  private async assertPollarOwnership(
+    userId: string,
+    walletAddress: string,
+    claimedPollarUserId: string,
+  ): Promise<void> {
+    const { walletPublicKey, pollarUserId } = await this.readVerifiedIdentity(userId);
+
+    if (walletPublicKey !== walletAddress) {
+      throw new ForbiddenException('Pollar wallet does not match the authenticated user');
+    }
+    // The address alone is not enough. Without this, any account could attach
+    // someone else's Pollar id to a wallet it does own, and the reverse lookup
+    // scripts/013 adds its index for — "find the wallet for this Pollar user" —
+    // would answer with the wrong person.
+    if (!pollarUserId || pollarUserId !== claimedPollarUserId) {
+      throw new ForbiddenException('pollar_user_id does not match the authenticated user');
+    }
+  }
+
   async linkWallet(
     userId: string,
     dto: LinkWalletDto,
@@ -215,10 +290,47 @@ export class WalletsService {
     let isVerified: boolean;
     let verifiedAt: string | null;
 
+    // Resolved per wallet_type below. A wallet connected by its owner in the
+    // browser has no identity provider, so accepting one for it would record an
+    // origin that never happened; the only external wallet that carries one is a
+    // wallet Pollar itself authenticated.
+    let authProvider: AuthProvider | null = null;
+    let pollarUserId: string | null = null;
+
     if (dto.wallet_type === 'custodial') {
       // Custodial wallets are auto-verified
       isVerified = true;
       verifiedAt = new Date().toISOString();
+
+      authProvider = dto.auth_provider ?? null;
+      pollarUserId = dto.pollar_user_id ?? null;
+
+      // pollar_user_id identifies a Pollar user; pairing it with another provider
+      // would leave a row whose two identity columns disagree.
+      if (pollarUserId && authProvider !== 'pollar') {
+        throw new BadRequestException("pollar_user_id requires auth_provider 'pollar'");
+      }
+      if (authProvider === 'pollar' && !pollarUserId) {
+        throw new BadRequestException("auth_provider 'pollar' requires pollar_user_id");
+      }
+
+      // An Accesly wallet is a passkey smart account and links as wallet_type
+      // 'accesly', which is where its c_address and its ownership proof are
+      // required. Recording the provider on a custodial row would claim an
+      // Accesly origin for a wallet that went through none of that.
+      if (authProvider === 'accesly') {
+        throw new BadRequestException("auth_provider 'accesly' requires wallet_type 'accesly'");
+      }
+
+      // 'custodial' is Pollar's main path (wallet.type 'internal') and the one
+      // branch that proves nothing — it auto-verifies. Harmless while the row
+      // says nothing about who the user is; not harmless once it names a Pollar
+      // identity, which is precisely what this endpoint cannot take on trust.
+      // Checking wallet_type first is what made this reachable: the same request
+      // as 'freighter' was refused, and as 'custodial' it was stored.
+      if (authProvider === 'pollar' && pollarUserId) {
+        await this.assertPollarOwnership(userId, dto.wallet_address, pollarUserId);
+      }
     } else if (dto.wallet_type === 'accesly') {
       // Accesly (passkey smart account, #109) can't produce a classic SEP-0043
       // wallet signature here, but ownership of the G-address was already
@@ -228,6 +340,17 @@ export class WalletsService {
       // auth_users.wallet_public_key to the address. Accept that proof.
       if (!dto.c_address) {
         throw new BadRequestException('c_address is required for accesly wallets');
+      }
+
+      // The passkey login provisioned this wallet, so wallet_type already names
+      // the provider. Echoing 'accesly' back is fine, but any other provider —
+      // or a Pollar user id — describes an origin this wallet does not have.
+      // Refuse it rather than silently overwrite what the caller sent.
+      if (dto.auth_provider && dto.auth_provider !== 'accesly') {
+        throw new BadRequestException("auth_provider must be 'accesly' for an accesly wallet");
+      }
+      if (dto.pollar_user_id) {
+        throw new BadRequestException('pollar_user_id is not valid for an accesly wallet');
       }
       const { data: authUser } = await this.supabase
         .getClient()
@@ -240,7 +363,34 @@ export class WalletsService {
       }
       isVerified = true;
       verifiedAt = new Date().toISOString();
+
+      // Guarded above: whatever the caller sent agrees with this or was refused.
+      authProvider = 'accesly';
+      pollarUserId = null;
+    } else if (dto.auth_provider === 'pollar') {
+      // A wallet the user brought, but authenticated through Pollar (#108).
+      // It cannot produce a SEP-0043 signature here — the browser never held
+      // the key, Pollar drove the wallet — but ownership was already proven:
+      // Pollar runs SEP-10 against the wallet, and the app JWT is minted only
+      // after that, writing the address onto auth_users.wallet_public_key.
+      // Same shape of proof the accesly branch accepts, so the same treatment.
+      if (!dto.pollar_user_id) {
+        throw new BadRequestException("auth_provider 'pollar' requires pollar_user_id");
+      }
+
+      await this.assertPollarOwnership(userId, dto.wallet_address, dto.pollar_user_id);
+
+      isVerified = true;
+      verifiedAt = new Date().toISOString();
+      authProvider = 'pollar';
+      pollarUserId = dto.pollar_user_id;
     } else {
+      if (dto.auth_provider || dto.pollar_user_id) {
+        throw new BadRequestException(
+          'auth_provider and pollar_user_id are only valid for wallets a login provisioned or authenticated',
+        );
+      }
+
       // Non-custodial: require signed_message + signature
       if (!dto.signed_message || !dto.signature) {
         throw new BadRequestException(
@@ -282,36 +432,46 @@ export class WalletsService {
       verified_at: verifiedAt,
     };
 
-    // Accesly (#109) / Pollar (FE #108) identity: login method + Smart Account
-    // C-address. wallet_address keeps the derived G-address, which is what
-    // Trustless Work role matching (by-signer / by-role) keys on.
-    const authProvider =
-      dto.auth_provider ?? (dto.wallet_type === 'accesly' ? 'accesly' : undefined);
+    // Accesly (#109) / Pollar (FE #108) identity: login method, Pollar user id
+    // and Smart Account C-address. wallet_address keeps the derived G-address,
+    // which is what Trustless Work role matching (by-signer / by-role) keys on.
+    // authProvider and pollarUserId were resolved per wallet_type above.
     const identityRow = {
       ...baseRow,
       ...(authProvider ? { auth_provider: authProvider } : {}),
+      ...(pollarUserId ? { pollar_user_id: pollarUserId } : {}),
       ...(dto.c_address ? { c_address: dto.c_address } : {}),
     };
 
-    let { data, error } = await this.supabase
-      .getClient()
-      .from('user_wallets')
-      .insert(identityRow)
-      .select()
-      .single();
+    const insertRow = (row: Record<string, unknown>) =>
+      this.supabase.getClient().from('user_wallets').insert(row).select().single();
 
-    // Fall back to the base row while migration 008 hasn't been applied.
-    if (error && error.code === 'PGRST204') {
+    let { data, error } = await insertRow(identityRow);
+
+    // PGRST204 means the table has no such column. Give up the identity one
+    // column at a time instead of all at once: with 008 applied and 013 pending
+    // — the state this branch deploys into — only pollar_user_id is missing, and
+    // dropping auth_provider along with it would leave a row indistinguishable
+    // from an external wallet while auth_users.wallet_provider says 'pollar'.
+    if (error?.code === 'PGRST204' && pollarUserId) {
       console.warn(
-        `[wallets] user_wallets is missing the identity columns (migration 008 pending) — ` +
-          `linking ${dto.wallet_address} WITHOUT auth_provider/c_address`,
+        `[wallets] user_wallets has no pollar_user_id (migration 013 pending) — ` +
+          `linking ${dto.wallet_address} WITHOUT it, keeping auth_provider`,
       );
-      ({ data, error } = await this.supabase
-        .getClient()
-        .from('user_wallets')
-        .insert(baseRow)
-        .select()
-        .single());
+      const { pollar_user_id: _omitted, ...withoutPollarUserId } = identityRow as Record<
+        string,
+        unknown
+      >;
+      ({ data, error } = await insertRow(withoutPollarUserId));
+    }
+
+    // Nothing of the identity survives 008 being absent too.
+    if (error?.code === 'PGRST204') {
+      console.warn(
+        `[wallets] user_wallets is missing the identity columns (migrations 008/013 pending) — ` +
+          `linking ${dto.wallet_address} WITHOUT auth_provider/pollar_user_id/c_address`,
+      );
+      ({ data, error } = await insertRow(baseRow));
     }
 
     if (error) {

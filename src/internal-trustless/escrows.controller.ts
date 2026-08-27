@@ -4,15 +4,19 @@ import {
   Controller,
   Get,
   HttpCode,
+  Logger,
   OnModuleInit,
   Param,
   Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
+import { StrKey } from '@stellar/stellar-sdk';
 import { formatUpstreamError } from './escrow-write.helper';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Public } from '../common/decorators/public.decorator';
 import { RetryQueueService } from '../retry-queue/retry-queue.service';
 import { RetryJobType } from '../retry-queue/retry-queue.types';
 import { relayToTrustless } from './trustless-relay.helper';
@@ -33,6 +37,8 @@ import {
 @Controller('escrows')
 @UseGuards(JwtAuthGuard)
 export class EscrowsController implements OnModuleInit {
+  private readonly logger = new Logger(EscrowsController.name);
+
   // NOTE: write endpoints require a valid JWT (class-level JwtAuthGuard) but do NOT
   // bind the JWT user to `signer`. Authorization of the actual signer is enforced by
   // the on-chain signature: build endpoints only return an UNSIGNED XDR, and the
@@ -72,6 +78,16 @@ export class EscrowsController implements OnModuleInit {
     }
   }
 
+  /**
+   * `@Public()`: escrows are public on-chain data and this handler never bound the
+   * address to the JWT user anyway — any authenticated caller could already read any
+   * address. Keeping it behind auth only forced the dashboard to mint a JWT (and pop a
+   * wallet-signature prompt) to read public data. Writes stay authenticated.
+   * Throttled because it still spends our server-side Trustless Work API key.
+   */
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Get('by-signer/:address')
   async getEscrowsBySigner(
     @Param('address') address: string,
@@ -79,6 +95,7 @@ export class EscrowsController implements OnModuleInit {
     @Query('pageSize') pageSize?: string,
     @Query('validateOnChain') validateOnChain?: string,
   ) {
+    EscrowsController.assertStellarAddress(address);
     // Trustless Work's helper expects `signer` (NOT `address`) plus pagination
     // flags; sending `address` makes TW reject with "property address should not
     // exist" (400), which used to force the frontend to fall back to calling TW
@@ -93,6 +110,16 @@ export class EscrowsController implements OnModuleInit {
     return result.data;
   }
 
+  /**
+   * The `@Public()` reads take their address from an unauthenticated caller, so reject
+   * anything that isn't a Stellar public key before spending a Trustless Work call.
+   */
+  private static assertStellarAddress(address: string): void {
+    if (!address || !StrKey.isValidEd25519PublicKey(address)) {
+      throw new BadRequestException('`address` no es una clave pública Stellar válida');
+    }
+  }
+
   // Trustless Work expects role values in camelCase (e.g. `serviceProvider`).
   // The frontend/app uses snake_case, so normalize here — the backend owns the TW
   // contract. Sending `service_provider` queries a non-existent `roles.service_provider`
@@ -103,6 +130,10 @@ export class EscrowsController implements OnModuleInit {
     dispute_resolver: 'disputeResolver',
   };
 
+  /** Public for the same reason as `by-signer` above. */
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Get('by-role')
   async getEscrowsByRole(
     @Query('address') address: string,
@@ -110,6 +141,7 @@ export class EscrowsController implements OnModuleInit {
     @Query('status') status?: string,
     @Query('type') type?: 'single-release' | 'multi-release',
   ) {
+    EscrowsController.assertStellarAddress(address);
     // TW's helper filters a role by `roleAddress` (NOT `address`).
     const query: Record<string, string | number | boolean> = { roleAddress: address };
     if (role) query.role = EscrowsController.TW_ROLE_MAP[role] ?? role;
@@ -170,11 +202,28 @@ export class EscrowsController implements OnModuleInit {
   /**
    * POST /escrows/change-milestone-status
    * Cambiar el estado de un milestone (evidencia + status). Devuelve { unsignedTransaction }.
+   *
+   * @deprecated Use `PATCH /v1/agreements/:id/milestones` instead.
+   * This endpoint is the deprecated duplicate of the canonical evidence submission path.
+   * Kept for backward compatibility with existing TW-proxy callers (GF-4-BE / issue #142).
+   * TW status values are passed through unchanged; normalization belongs to inbound
+   * webhook/reconciliation persistence paths.
    */
   @Post('change-milestone-status')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Cambiar estado de milestone (devuelve XDR sin firmar)' })
+  @ApiOperation({
+    summary: 'Cambiar estado de milestone (devuelve XDR sin firmar)',
+    description:
+      '@deprecated Use PATCH /v1/agreements/:id/milestones instead (canonical evidence endpoint). ' +
+      'This endpoint is kept for backward compatibility only.',
+    deprecated: true,
+  })
   async changeMilestoneStatus(@Body() dto: ChangeMilestoneStatusDto) {
+    this.logger.warn(
+      'POST /escrows/change-milestone-status is deprecated. ' +
+        'Use PATCH /v1/agreements/:id/milestones instead (GF-4-BE / #142).',
+    );
+
     return this.writeWithBackstop(
       RetryJobType.MILESTONE_UPDATE,
       `milestone_update:status:${dto.contractId}:${dto.milestoneIndex}:${dto.newStatus}`,

@@ -162,6 +162,49 @@ describe('EscrowsController — retry queue backstop', () => {
     );
   });
 
+  it('passes legacy TW status "completed" through unchanged and logs deprecation', async () => {
+    mockedRelay.mockReturnValueOnce(twResponse(500, {}));
+    const { controller, enqueue } = buildController();
+
+    const dto: ChangeMilestoneStatusDto = {
+      contractId: 'c-1',
+      milestoneIndex: '0',
+      newEvidence: 'proof',
+      newStatus: 'completed',
+      serviceProvider: SIGNER,
+      type: 'single-release',
+    };
+
+    await expect(controller.changeMilestoneStatus(dto)).rejects.toBeDefined();
+
+    // The TW proxy body and idempotency key must retain the caller's TW status.
+    const [, , key] = enqueue.mock.calls[0];
+    expect(key).toContain('completed');
+    expect(key).not.toContain('released');
+    expect(enqueue.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ body: expect.objectContaining({ newStatus: 'completed' }) }),
+    );
+  });
+
+  it('changeMilestoneStatus passes through canonical statuses unchanged', async () => {
+    mockedRelay.mockReturnValueOnce(twResponse(500, {}));
+    const { controller, enqueue } = buildController();
+
+    const dto: ChangeMilestoneStatusDto = {
+      contractId: 'c-1',
+      milestoneIndex: '0',
+      newEvidence: 'proof',
+      newStatus: 'approved',
+      serviceProvider: SIGNER,
+      type: 'single-release',
+    };
+
+    await expect(controller.changeMilestoneStatus(dto)).rejects.toBeDefined();
+
+    const [, , key] = enqueue.mock.calls[0];
+    expect(key).toContain('approved');
+  });
+
   it('registers one replay handler per bucket that re-runs relayWrite with the stored path/body', async () => {
     const { registerHandler } = buildController();
 

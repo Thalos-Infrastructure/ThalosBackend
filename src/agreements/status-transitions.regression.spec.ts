@@ -11,10 +11,11 @@ import { validateTransition } from './agreement.validator';
 
 type Row = Record<string, unknown>;
 
-function buildDb(agreements: Row[], authUsers: Row[]) {
+function buildDb(agreements: Row[], authUsers: Row[], userWallets: Row[] = []) {
   const tables: Record<string, Row[]> = {
     agreements: agreements.map((r) => ({ ...r })),
     auth_users: authUsers.map((r) => ({ ...r })),
+    user_wallets: userWallets.map((r) => ({ ...r })),
     agreement_participants: [],
     agreement_activity: [],
   };
@@ -33,6 +34,12 @@ function buildDb(agreements: Row[], authUsers: Row[]) {
       filters.push((r) => r[col] === val);
       return self();
     };
+    api.in = (col: string, vals: unknown[]) => {
+      filters.push((r) => vals.includes(r[col]));
+      return self();
+    };
+    api.order = () => self();
+    api.limit = () => finalizeList();
     api.insert = (data: Row) => {
       mode = 'insert';
       payload = data;
@@ -66,8 +73,15 @@ function buildDb(agreements: Row[], authUsers: Row[]) {
       return Promise.resolve({ data: matched[0] ?? null, error: null });
     };
 
+    // Supabase resolves a select without .single()/.maybeSingle() to an array.
+    function finalizeList(): Promise<{ data: unknown; error: unknown }> {
+      if (mode === 'insert') return finalize();
+      const matched = rows.filter((r) => filters.every((f) => f(r)));
+      return Promise.resolve({ data: matched, error: null });
+    }
+
     (api as { then?: unknown }).then = (resolve: (v: unknown) => unknown) =>
-      finalize().then(resolve);
+      finalizeList().then(resolve);
     return api;
   }
 
@@ -106,6 +120,7 @@ describe('regression: illegal status transitions blocked (issue #59 / #67 · PR 
         },
       ],
       [{ id: 'user-1', wallet_public_key: 'GWALLET' }],
+      [{ user_id: 'user-1', wallet_address: 'GWALLET', is_primary: true }],
     );
     const supabase = { getClient: () => db.client } as never;
     const activity = new AgreementActivityService(supabase);

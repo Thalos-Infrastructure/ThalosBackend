@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { SendMessageDto } from './dto/agreement-chat.dto';
+import { resolveUserWallets, userCanAccessAgreement } from '../common/wallets/resolve-user-wallets';
 
 export interface AgreementMessage {
   id: string;
@@ -20,30 +21,17 @@ export interface AgreementMessage {
 export class AgreementChatService {
   constructor(private readonly supabase: SupabaseService) {}
 
-  private async walletForUserId(userId: string): Promise<string | null> {
-    const { data, error } = await this.supabase
-      .getClient()
-      .from('auth_users')
-      .select('wallet_public_key')
-      .eq('id', userId)
-      .maybeSingle();
-    if (error || !data?.wallet_public_key) return null;
-    return data.wallet_public_key as string;
-  }
-
   private async assertActorWallet(userId: string, actorWallet: string) {
-    const w = await this.walletForUserId(userId);
-    if (!w || w !== actorWallet) {
+    const wallets = await resolveUserWallets(this.supabase.getClient(), userId);
+    if (!wallets.includes(actorWallet)) {
       throw new ForbiddenException('sender_wallet does not match authenticated user');
     }
   }
 
   private async assertCanAccessAgreement(userId: string, agreementId: string): Promise<void> {
-    const wallet = await this.walletForUserId(userId);
-    if (!wallet) throw new ForbiddenException('No wallet on profile');
+    const client = this.supabase.getClient();
 
-    const { data: agreement, error: aErr } = await this.supabase
-      .getClient()
+    const { data: agreement, error: aErr } = await client
       .from('agreements')
       .select('id, created_by')
       .eq('id', agreementId)
@@ -51,19 +39,8 @@ export class AgreementChatService {
     if (aErr || !agreement) throw new NotFoundException('Agreement not found');
 
     const createdBy = (agreement as { created_by: string }).created_by;
-    if (createdBy === wallet || createdBy === userId) return;
-
-    const { data: parts, error: partErr } = await this.supabase
-      .getClient()
-      .from('agreement_participants')
-      .select('wallet_address')
-      .eq('agreement_id', agreementId)
-      .eq('wallet_address', wallet)
-      .limit(1);
-    if (partErr) {
-      throw new BadRequestException(`Failed to verify participant status: ${partErr.message}`);
-    }
-    if (!parts?.length) {
+    const allowed = await userCanAccessAgreement(client, userId, agreementId, createdBy);
+    if (!allowed) {
       throw new ForbiddenException('Not a participant of this agreement');
     }
   }
