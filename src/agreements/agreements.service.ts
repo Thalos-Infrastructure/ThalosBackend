@@ -8,6 +8,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SupabaseService } from '../supabase/supabase.service';
 import { CreateAgreementDto } from './dto/create-agreement.dto';
 import { LinkContractDto } from './dto/link-contract.dto';
+import { ListAgreementsQueryDto } from './dto/list-agreements.dto';
 import { UpdateAgreementStatusDto } from './dto/update-status.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
 import { AGREEMENT_EVENTS } from '../common/events/agreement-events.constants';
@@ -449,28 +450,30 @@ export class AgreementsService {
     return { success: true, error: null };
   }
 
-  async listByWallet(userId: string, wallet: string) {
-    await this.assertActorWallet(userId, wallet);
+  /**
+   * Ids of every agreement reachable from `wallets`, as creator or participant.
+   * Supabase failures come back as a message instead of throwing, so callers
+   * keep returning the `{ agreements, error }` envelope.
+   */
+  private async agreementIdsForWallets(
+    wallets: string[],
+  ): Promise<{ ids: string[]; error: string | null }> {
+    if (wallets.length === 0) return { ids: [], error: null };
+    const client = this.supabase.getClient();
 
-    const { data: participations, error: partError } = await this.supabase
-      .getClient()
+    const { data: participations, error: partError } = await client
       .from('agreement_participants')
       .select('agreement_id')
-      .eq('wallet_address', wallet);
+      .in('wallet_address', wallets);
 
-    if (partError) {
-      return { agreements: [], error: partError.message };
-    }
+    if (partError) return { ids: [], error: partError.message };
 
-    const { data: createdRows, error: createdError } = await this.supabase
-      .getClient()
+    const { data: createdRows, error: createdError } = await client
       .from('agreements')
       .select('id')
-      .eq('created_by', wallet);
+      .in('created_by', wallets);
 
-    if (createdError) {
-      return { agreements: [], error: createdError.message };
-    }
+    if (createdError) return { ids: [], error: createdError.message };
 
     const idSet = new Set<string>();
     participations?.forEach((p) => {
@@ -480,20 +483,54 @@ export class AgreementsService {
       if (r.id) idSet.add(r.id as string);
     });
 
-    if (idSet.size === 0) {
-      return { agreements: [], error: null };
-    }
+    return { ids: [...idSet], error: null };
+  }
 
-    const ids = [...idSet];
-    const { data: agreements, error: agError } = await this.supabase
-      .getClient()
-      .from('agreements')
-      .select('*')
-      .in('id', ids)
-      .order('created_at', { ascending: false });
+  /** Full agreement rows for `ids`, newest first, narrowed by the optional filters. */
+  private async fetchAgreementsByIds(
+    ids: string[],
+    filters: { status?: string; agreementType?: string } = {},
+  ) {
+    if (ids.length === 0) return { agreements: [], error: null };
 
-    if (agError) return { agreements: [], error: agError.message };
-    return { agreements: agreements ?? [], error: null };
+    let query = this.supabase.getClient().from('agreements').select('*').in('id', ids);
+    if (filters.status) query = query.eq('status', filters.status);
+    if (filters.agreementType) query = query.eq('agreement_type', filters.agreementType);
+
+    const { data, error } = await query.order('created_at', { ascending: false });
+
+    if (error) return { agreements: [], error: error.message };
+    return { agreements: data ?? [], error: null };
+  }
+
+  /**
+   * Every agreement the authenticated user can see — across all wallets they
+   * own, not just the active one — optionally narrowed by status and type.
+   *
+   * A user with no linked wallet lists empty rather than 403: having nothing to
+   * show is not an authorization failure. `listByWallet` still rejects, because
+   * there the caller names a specific wallet and must prove it owns it.
+   */
+  async list(userId: string, query: ListAgreementsQueryDto = {}) {
+    const wallets = await this.walletsForUserId(userId);
+    if (wallets.length === 0) return { agreements: [], error: null };
+
+    const { ids, error } = await this.agreementIdsForWallets(wallets);
+    if (error) return { agreements: [], error };
+
+    return this.fetchAgreementsByIds(ids, {
+      status: query.status,
+      agreementType: query.type,
+    });
+  }
+
+  async listByWallet(userId: string, wallet: string) {
+    await this.assertActorWallet(userId, wallet);
+
+    const { ids, error } = await this.agreementIdsForWallets([wallet]);
+    if (error) return { agreements: [], error };
+
+    return this.fetchAgreementsByIds(ids);
   }
 
   async getById(userId: string, agreementId: string) {

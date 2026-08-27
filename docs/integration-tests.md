@@ -11,6 +11,8 @@ These tests compile the Nest controllers/services and exercise them over HTTP wi
 - `GET /v1/wallets/with-balances`.
 - `GET /v1/wallets/agreements`.
 - `POST /v1/agreements`.
+- `GET /v1/agreements?status=&type=` — filtering, blank params, rejection of unknown filter
+  values, auth scoping across every wallet the user owns, and the error envelope.
 - `GET /v1/agreements/by-wallet`.
 - `POST /v1/disputes`, resolver assignment, and `PATCH /v1/disputes/:id/resolve`.
 - `GET /v1/escrows/by-signer/:address`.

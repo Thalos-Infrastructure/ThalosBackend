@@ -10,12 +10,13 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, type AuthUserCtx } from '../auth/current-user.decorator';
 import { AgreementsService } from './agreements.service';
 import { CreateAgreementDto } from './dto/create-agreement.dto';
 import { LinkContractDto } from './dto/link-contract.dto';
+import { ListAgreementsQueryDto } from './dto/list-agreements.dto';
 import { UpdateAgreementStatusDto } from './dto/update-status.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
 import { AgreementSyncService } from './sync/agreement-sync.service';
@@ -47,6 +48,17 @@ export class AgreementsController {
       });
     }
     return result;
+  }
+
+  @Get()
+  @ApiOperation({
+    summary: 'List the authenticated user’s agreements',
+    description:
+      'Every agreement the user created or participates in, across all wallets they own, ' +
+      'newest first. `status` and `type` are optional filters; blank values are ignored.',
+  })
+  list(@CurrentUser() user: AuthUserCtx, @Query() query: ListAgreementsQueryDto) {
+    return this.agreements.list(user.userId, query);
   }
 
   @Get('by-wallet')

@@ -1021,6 +1021,110 @@ describe('migrated backend flows (integration)', () => {
         .expect(403);
     });
 
+    describe('GET /agreements — filtered list (GF-3-BE)', () => {
+      const FOREIGN_ID = 'agr-list-foreign';
+      const SECOND_WALLET_ID = 'agr-list-second-wallet';
+
+      beforeEach(() => {
+        // The base fixture agreement predates agreement_type; give it one so the
+        // ?type= filter has something to discriminate on.
+        supabase.tables.agreements[0].agreement_type = 'multi';
+        supabase.tables.agreements.push(
+          {
+            id: SECOND_WALLET_ID,
+            title: 'Reachable through the second wallet',
+            amount: '10.00',
+            asset: 'USDC',
+            status: 'completed',
+            agreement_type: 'single',
+            created_by: SECOND_WALLET,
+            milestones: [],
+            metadata: {},
+            created_at: '2026-05-01T00:00:00.000Z',
+            updated_at: '2026-05-01T00:00:00.000Z',
+          },
+          {
+            id: FOREIGN_ID,
+            title: 'Belongs to another user',
+            amount: '20.00',
+            asset: 'USDC',
+            status: 'active',
+            agreement_type: 'multi',
+            created_by: OTHER_WALLET,
+            milestones: [],
+            metadata: {},
+            created_at: '2026-07-01T00:00:00.000Z',
+            updated_at: '2026-07-01T00:00:00.000Z',
+          },
+        );
+        supabase.tables.agreement_participants.push({
+          id: 'participant-foreign',
+          agreement_id: FOREIGN_ID,
+          wallet_address: OTHER_WALLET,
+          role: 'payer',
+        });
+      });
+
+      type ListEnvelope = { agreements: Array<{ id: string }>; error: string | null };
+
+      const getAgreements = (query = '') =>
+        request(app.getHttpServer()).get(`/v1/agreements${query}`);
+
+      /** GET /v1/agreements as `sub`, asserting 200 and returning the envelope. */
+      const list = async (query = '', sub = USER_ID): Promise<ListEnvelope> => {
+        const response = await getAgreements(query).set(auth(sub)).expect(200);
+        return response.body as ListEnvelope;
+      };
+      const idsOf = (envelope: ListEnvelope) => envelope.agreements.map((a) => a.id);
+
+      it('returns the caller’s agreements across every owned wallet, newest first', async () => {
+        const envelope = await list();
+
+        expect(envelope.error).toBeNull();
+        expect(idsOf(envelope)).toEqual([
+          AGREEMENT_ID, // 2026-06-01, created_by WALLET
+          SECOND_WALLET_ID, // 2026-05-01, created_by SECOND_WALLET
+        ]);
+      });
+
+      it('scopes results to the authenticated user', async () => {
+        // The other user sees only their own agreement, never the caller's.
+        expect(idsOf(await list('', OTHER_USER_ID))).toEqual([FOREIGN_ID]);
+      });
+
+      it('filters by status, by type, and by both', async () => {
+        expect(idsOf(await list('?status=active'))).toEqual([AGREEMENT_ID]);
+        expect(idsOf(await list('?type=single'))).toEqual([SECOND_WALLET_ID]);
+        expect(idsOf(await list('?status=completed&type=single'))).toEqual([SECOND_WALLET_ID]);
+      });
+
+      it('returns an empty list when nothing matches', async () => {
+        expect(await list('?status=disputed')).toEqual({ agreements: [], error: null });
+      });
+
+      it('treats ?status=&type= as unfiltered', async () => {
+        expect(idsOf(await list('?status=&type='))).toEqual([AGREEMENT_ID, SECOND_WALLET_ID]);
+      });
+
+      it('rejects unknown filter values and unknown params with 400', async () => {
+        await getAgreements('?status=archived').set(auth()).expect(400);
+        await getAgreements('?type=retainer').set(auth()).expect(400);
+        // forbidNonWhitelisted: a misspelled filter fails loudly instead of listing everything.
+        await getAgreements('?statuses=active').set(auth()).expect(400);
+      });
+
+      it('requires authentication', async () => {
+        await getAgreements().expect(401);
+        await getAgreements().set('Authorization', 'Bearer invalid-token').expect(401);
+      });
+
+      it('surfaces a Supabase failure in the envelope instead of throwing', async () => {
+        supabase.failOnce('agreement_participants', 'select', 'participants unavailable');
+
+        expect(await list()).toEqual({ agreements: [], error: 'participants unavailable' });
+      });
+    });
+
     it('GET /agreements/by-wallet - success', async () => {
       await request(app.getHttpServer())
         .get(`/v1/agreements/by-wallet?wallet=${WALLET}`)
