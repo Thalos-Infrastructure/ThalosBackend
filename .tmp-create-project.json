@@ -1,0 +1,8 @@
+{
+  "name": "thalosbackend-staging",
+  "framework": "nestjs",
+  "gitRepository": {
+    "type": "github",
+    "repo": "Thalos-Infrastructure/ThalosBackend"
+  }
+}
