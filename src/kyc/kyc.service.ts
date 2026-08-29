@@ -1,4 +1,5 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import { SupabaseService } from '../supabase/supabase.service';
 import {
   IKycProvider,
@@ -6,6 +7,14 @@ import {
   KycStatus,
 } from '../identity-providers/interfaces/kyc-provider.interface';
 import { CreateKycSessionDto } from './dto/kyc.dto';
+
+interface WebhookResult {
+  providerVerificationId: string;
+  result: {
+    status: KycStatus;
+    verifiedAt: string | null;
+  };
+}
 
 /** Row shape stored in `public.verifications` for a KYC record. */
 export interface KycVerificationRecord {
@@ -57,6 +66,8 @@ const RETRYABLE_STATUSES = new Set(['rejected', 'expired', 'unverified']);
 
 @Injectable()
 export class KycService {
+  private readonly logger = new Logger(KycService.name);
+
   constructor(
     private readonly supabase: SupabaseService,
     @Inject(KYC_PROVIDER) private readonly provider: IKycProvider,
@@ -199,5 +210,36 @@ export class KycService {
     // No existing record — create a brand-new session.
     const verification = await this.upsertVerification(userId, null, dto.metadata ?? {}, '');
     return { verification };
+  }
+
+  @OnEvent('kyc.webhook.processed')
+  async handleWebhookProcessed(payload: WebhookResult) {
+    const { providerVerificationId, result } = payload;
+    const now = new Date().toISOString();
+    const mappedStatus = mapProviderStatus(result.status);
+    const isVerified = result.status === KycStatus.VERIFIED;
+
+    const { data, error } = await this.supabase
+      .getClient()
+      .from('verifications')
+      .update({
+        status: mappedStatus,
+        verified_at: isVerified ? (result.verifiedAt ?? now) : null,
+        updated_at: now,
+      })
+      .eq('provider_reference', providerVerificationId)
+      .select();
+
+    if (error) {
+      this.logger.error(`Failed to update KYC status from webhook: ${error.message}`);
+    } else if (!data || data.length === 0) {
+      this.logger.warn(
+        `Webhook processed for unknown provider reference: ${providerVerificationId}`,
+      );
+    } else {
+      this.logger.log(
+        `Webhook updated KYC status to ${mappedStatus} for reference: ${providerVerificationId}`,
+      );
+    }
   }
 }

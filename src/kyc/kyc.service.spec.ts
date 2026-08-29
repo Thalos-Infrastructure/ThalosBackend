@@ -237,3 +237,14 @@ describe('KycService.createSession', () => {
     expect(provider.createSession).toHaveBeenCalled();
   });
 });
+
+describe('KycService.handleWebhookProcessed', () => {
+  it('updates verification record based on webhook payload', async () => {
+    const { svc, getClient } = buildService({ getClientCalls: [chainMock([{ id: 'rec-1' }])] });
+    await svc.handleWebhookProcessed({
+      providerVerificationId: 'sess-1',
+      result: { status: 'verified' as any, verifiedAt: new Date().toISOString() },
+    });
+    expect(getClient).toHaveBeenCalled();
+  });
+});
