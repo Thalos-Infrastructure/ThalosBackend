@@ -1,0 +1,10 @@
+{
+  "key": "API_KEY",
+  "value": "re_aDongW7F_AKH7yftswij1yga9WdrqiPtn",
+  "type": "encrypted",
+  "target": [
+    "production",
+    "preview",
+    "development"
+  ]
+}
