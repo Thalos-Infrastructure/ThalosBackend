@@ -100,9 +100,9 @@ function makeQueryBuilder(store: Store, table: string) {
 
       // --- DELETE ---
       if (isDelete) {
-        const rows = (store as any)[table] as Row[];
+        const rows = (store as any)[table];
         (store as any)[table] = rows.filter(
-          (r) => !eqFilters.every(({ key, value }) => r[key] === value),
+          (r: Row) => !eqFilters.every(({ key, value }) => r[key] === value),
         );
         return resolve({ data: null, error: null });
       }
@@ -127,7 +127,7 @@ function makeQueryBuilder(store: Store, table: string) {
           ...(table === 'applications' ? { status: 'pending', message: '' } : {}),
           ...pendingInsert,
         };
-        (store as any)[table] = [...((store as any)[table] as Row[]), newRow];
+        (store as any)[table] = [...(store as any)[table], newRow];
         if (singleMode) return resolve({ data: newRow, error: null });
         return resolve({ data: [newRow], error: null });
       }
@@ -135,8 +135,8 @@ function makeQueryBuilder(store: Store, table: string) {
       // --- UPDATE ---
       if (pendingUpdate) {
         let updated: Row | null = null;
-        const rows = (store as any)[table] as Row[];
-        (store as any)[table] = rows.map((r) => {
+        const rows = (store as any)[table];
+        (store as any)[table] = rows.map((r: Row) => {
           const matchesEq = eqFilters.every(({ key, value }) => r[key] === value);
           const matchesNeq = neqFilters.every(({ key, value }) => r[key] !== value);
           if (matchesEq && matchesNeq) {
@@ -150,15 +150,15 @@ function makeQueryBuilder(store: Store, table: string) {
       }
 
       // --- SELECT ---
-      let rows = [...((store as any)[table] as Row[])];
+      let rows = [...(store as any)[table]];
       for (const { key, value } of eqFilters) {
-        rows = rows.filter((r) => r[key] === value);
+        rows = rows.filter((r: Row) => r[key] === value);
       }
       for (const { key, value } of neqFilters) {
-        rows = rows.filter((r) => r[key] !== value);
+        rows = rows.filter((r: Row) => r[key] !== value);
       }
       if (orderClause) {
-        rows.sort((a, b) => {
+        rows.sort((a: Row, b: Row) => {
           if (a[orderClause!.column] < b[orderClause!.column])
             return orderClause!.ascending ? -1 : 1;
           if (a[orderClause!.column] > b[orderClause!.column])
@@ -265,10 +265,10 @@ describe('ApplicationsService', () => {
 
       expect(result.error).toBeNull();
       expect(result.application).toBeTruthy();
-      expect(result.application!.opportunity_id).toBe(OPP_ID);
-      expect(result.application!.builder_id).toBe(BUILDER_USER);
-      expect(result.application!.status).toBe('pending');
-      expect(result.application!.message).toBe('Hello from builder');
+      expect(result.application.opportunity_id).toBe(OPP_ID);
+      expect(result.application.builder_id).toBe(BUILDER_USER);
+      expect(result.application.status).toBe('pending');
+      expect(result.application.message).toBe('Hello from builder');
       expect(store.applications).toHaveLength(1);
     });
 
@@ -279,7 +279,7 @@ describe('ApplicationsService', () => {
       const result = await svc.apply(BUILDER_USER, { opportunity_id: OPP_ID });
 
       expect(result.error).toBeNull();
-      expect(result.application!.message).toBe('');
+      expect(result.application.message).toBe('');
     });
 
     it('throws ConflictException on duplicate (same opportunity + builder)', async () => {
@@ -458,7 +458,7 @@ describe('ApplicationsService', () => {
       const result = await svc.updateStatus(OWNER_USER, 'app-pending', { status: 'accepted' });
 
       expect(result.error).toBeNull();
-      expect(result.application!.status).toBe('accepted');
+      expect(result.application.status).toBe('accepted');
     });
 
     it('rejects a pending application', async () => {
@@ -468,7 +468,7 @@ describe('ApplicationsService', () => {
       const result = await svc.updateStatus(OWNER_USER, 'app-pending', { status: 'rejected' });
 
       expect(result.error).toBeNull();
-      expect(result.application!.status).toBe('rejected');
+      expect(result.application.status).toBe('rejected');
     });
 
     it('marks the opportunity as filled when application is accepted', async () => {
@@ -557,7 +557,9 @@ describe('ApplicationsService', () => {
       const svc = buildService(store);
 
       await expect(
-        svc.updateStatus(OWNER_USER, '00000000-0000-0000-0000-999999999999', { status: 'accepted' }),
+        svc.updateStatus(OWNER_USER, '00000000-0000-0000-0000-999999999999', {
+          status: 'accepted',
+        }),
       ).rejects.toThrow(NotFoundException);
     });
   });
