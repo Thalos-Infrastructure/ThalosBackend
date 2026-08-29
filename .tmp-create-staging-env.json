@@ -1,0 +1,5 @@
+{
+  "slug": "staging",
+  "description": "Staging environment tracking the main branch. Seeded as a replica of production environment variables; to be reconfigured by the team (testnet Stellar config, staging DB, etc.).",
+  "branchMatcher": { "type": "equals", "pattern": "main" }
+}
