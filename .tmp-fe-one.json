@@ -1,0 +1,10 @@
+{
+  "key": "SUPABASE_URL",
+  "value": "https://cpkjclwvgnxgadiaoaei.supabase.co",
+  "type": "encrypted",
+  "target": [
+    "production",
+    "preview",
+    "development"
+  ]
+}
