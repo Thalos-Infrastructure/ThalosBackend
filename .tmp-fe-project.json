@@ -1,0 +1,8 @@
+{
+  "name": "thalosfrontend-staging",
+  "framework": "nextjs",
+  "gitRepository": {
+    "type": "github",
+    "repo": "Thalos-Infrastructure/ThalosFrontend"
+  }
+}
