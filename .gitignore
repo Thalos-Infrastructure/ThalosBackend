@@ -2,7 +2,14 @@ node_modules
 dist
 .env
 .env.local
+.env.*.local
 *.log
+
+# Never commit pulled env dumps or temp tooling files (may contain secrets)
+.tmp-*
+.tmp-fe-pull/
+prod*.env
+*.env.pulled
 
 # Permitir subir el archivo de ejemplo (solo placeholders, sin secretos)
 !.env.example
