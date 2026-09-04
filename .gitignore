@@ -11,5 +11,9 @@ dist
 prod*.env
 *.env.pulled
 
+# Local working clones of other repos (must never be nested into this repo)
+frontend-fix/
+*-fix/
+
 # Permitir subir el archivo de ejemplo (solo placeholders, sin secretos)
 !.env.example
