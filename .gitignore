@@ -17,3 +17,5 @@ frontend-fix/
 
 # Permitir subir el archivo de ejemplo (solo placeholders, sin secretos)
 !.env.example
+.vercel
+.env*
