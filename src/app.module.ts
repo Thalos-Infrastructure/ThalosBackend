@@ -23,6 +23,7 @@ import { KybModule } from './kyb/kyb.module';
 import { KycModule } from './kyc/kyc.module';
 import { IdentityProvidersModule } from './identity-providers/identity-providers.module';
 import { OpportunitiesModule } from './opportunities/opportunities.module';
+import { ApplicationsModule } from './applications/applications.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { OpportunitiesModule } from './opportunities/opportunities.module';
     KycModule,
     IdentityProvidersModule,
     OpportunitiesModule,
+    ApplicationsModule,
   ],
   controllers: [RootController],
 })

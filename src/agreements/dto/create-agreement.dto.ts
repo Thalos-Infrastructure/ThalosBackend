@@ -1,13 +1,5 @@
 import { Type } from 'class-transformer';
-import {
-  IsArray,
-  IsIn,
-  IsObject,
-  IsOptional,
-  IsString,
-  IsUUID,
-  ValidateNested,
-} from 'class-validator';
+import { IsArray, IsIn, IsObject, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { MILESTONE_STATUSES, type MilestoneStatus } from '../../common/milestone-status';
 
 class MilestoneDto {
@@ -27,11 +19,6 @@ class ParticipantDto {
 
   @IsString()
   role: string;
-
-  /** Opcional; si falta se intenta resolver por wallet en profiles */
-  @IsOptional()
-  @IsUUID()
-  profile_id?: string;
 }
 
 export class CreateAgreementDto {
