@@ -32,13 +32,17 @@ export class TrustlessRelayError extends BadRequestException {
   }
 }
 
-// Defaults de testnet (mismos que usa el frontend); sobreescribibles por env.
-const DEFAULT_PLATFORM_ADDRESS = 'GBTTKTSBLHGMRY3T65JXT423MHQZXTD26TTHQEY5HNF2KWFFDKKVHVPD';
+// No participant wallet is a safe platform fallback. Configure this per environment.
+const DEFAULT_PLATFORM_ADDRESS = '';
 const DEFAULT_DISPUTE_RESOLVER = 'GB6MP3L6UGIDY6O6MXNLSKHLXT2T2TCMPZIZGUTOGYKOLHW7EORWMFCK';
 const DEFAULT_TRUSTLINE_USDC = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
 
 function getPlatformAddress(): string {
-  return process.env.PLATFORM_ADDRESS || DEFAULT_PLATFORM_ADDRESS;
+  const platformAddress = process.env.PLATFORM_ADDRESS || DEFAULT_PLATFORM_ADDRESS;
+  if (!platformAddress) {
+    throw new BadRequestException('PLATFORM_ADDRESS debe estar configurado por ambiente');
+  }
+  return platformAddress;
 }
 
 function getDisputeResolver(): string {
@@ -96,7 +100,7 @@ function buildAgreementBody(dto: CreateEscrowDto) {
         description: m.description,
         amount: Number(m.amount),
         status: m.status,
-        receiver: dto.signer,
+        receiver: dto.roles.receiver,
       })),
     };
   }

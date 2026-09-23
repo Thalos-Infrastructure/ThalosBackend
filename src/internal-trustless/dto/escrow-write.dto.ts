@@ -25,10 +25,9 @@ class CreateEscrowRolesDto {
   @IsString()
   releaseSigner: string;
 
-  /** Requerido para single-release; el receiver de cada milestone en multi-release es el signer. */
-  @IsOptional()
+  /** Wallet que recibirá los fondos liberados. Debe ser el service provider en Thalos. */
   @IsString()
-  receiver?: string;
+  receiver: string;
 }
 
 class CreateEscrowMilestoneDto {
