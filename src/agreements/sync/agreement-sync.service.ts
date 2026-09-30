@@ -257,6 +257,7 @@ export class AgreementSyncService {
       const directResult = await relayToTrustless(
         'GET',
         `escrow/${encodeURIComponent(contractId)}`,
+        { validateOnChain: true },
       );
 
       if (directResult.status >= 200 && directResult.status < 300 && directResult.data) {
@@ -266,29 +267,14 @@ export class AgreementSyncService {
           : data;
       }
 
-      // Fallback: search by signer
+      // Do not query by signer with a contract id. A contract id is not a Stellar
+      // public key and that fallback can return an unrelated escrow. Treat a failed
+      // authoritative lookup as unavailable until the caller retries.
       this.logger.warn(
-        `Direct escrow lookup failed for ${contractId} (${directResult.status}), trying helper fallback`,
+        `Direct escrow lookup failed for ${contractId} (${directResult.status}); no safe contract-id fallback is configured`,
       );
+      return null;
 
-      const fallbackResult = await relayToTrustless('GET', 'helper/get-escrows-by-signer', {
-        signer: contractId,
-      });
-
-      if (fallbackResult.status >= 400) {
-        this.logger.warn(
-          `TW helper returned ${fallbackResult.status} for contract ${contractId}: ${JSON.stringify(fallbackResult.data)}`,
-        );
-        return null;
-      }
-
-      const escrows = fallbackResult.data as TrustlessEscrow[] | TrustlessEscrow | null;
-      if (!escrows) return null;
-
-      if (Array.isArray(escrows)) {
-        return escrows.find((e) => e.id === contractId) ?? escrows[0] ?? null;
-      }
-      return escrows;
     } catch (err) {
       this.logger.error(
         `Failed to fetch escrow ${contractId} from TW: ${err instanceof Error ? err.message : String(err)}`,

@@ -32,10 +32,11 @@ export class TrustlessRelayError extends BadRequestException {
   }
 }
 
-// No participant wallet is a safe platform fallback. Configure this per environment.
-const DEFAULT_PLATFORM_ADDRESS = '';
+// Canonical Thalos platform wallet. Override only for an explicitly isolated environment.
+const DEFAULT_PLATFORM_ADDRESS = 'GBMJTAVJFAKMKLXYXGXACBFGIFS62A7DT46PFHQ3W4RG7CG4HVESSNRY';
 const DEFAULT_DISPUTE_RESOLVER = 'GB6MP3L6UGIDY6O6MXNLSKHLXT2T2TCMPZIZGUTOGYKOLHW7EORWMFCK';
-const DEFAULT_TRUSTLINE_USDC = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
+const TESTNET_USDC_ISSUER = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
+const MAINNET_USDC_ISSUER = 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN';
 
 function getPlatformAddress(): string {
   const platformAddress = process.env.PLATFORM_ADDRESS || DEFAULT_PLATFORM_ADDRESS;
@@ -50,9 +51,11 @@ function getDisputeResolver(): string {
 }
 
 function getTrustline(): { symbol: string; address: string } {
+  const configured = process.env.TRUSTLINE_USDC_ADDRESS;
+  const network = (process.env.STELLAR_NETWORK || 'testnet').toLowerCase();
   return {
     symbol: 'USDC',
-    address: process.env.TRUSTLINE_USDC_ADDRESS || DEFAULT_TRUSTLINE_USDC,
+    address: configured || (network === 'mainnet' ? MAINNET_USDC_ISSUER : TESTNET_USDC_ISSUER),
   };
 }
 
