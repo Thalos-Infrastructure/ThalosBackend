@@ -486,6 +486,36 @@ export class AgreementsService {
     return { ids: [...idSet], error: null };
   }
 
+  private withActionMetadata<T extends Record<string, unknown>>(agreement: T): T & {
+    nextAction: string | null;
+    blockedReason: string | null;
+  } {
+    const status = String(agreement.status ?? 'pending');
+    const hasContract = Boolean(agreement.contract_id);
+    let nextAction: string | null = null;
+    let blockedReason: string | null = null;
+
+    if (!hasContract) {
+      blockedReason = 'Agreement is waiting for a Trustless Work contract';
+    } else {
+      nextAction = {
+        pending: 'fund',
+        funded: 'submit_evidence',
+        active: 'submit_evidence',
+        in_review: 'approve_or_request_changes',
+        disputed: 'resolve_dispute',
+        completed: null,
+        resolved: null,
+        cancelled: null,
+      }[status] ?? null;
+      if (!nextAction && !['completed', 'resolved', 'cancelled'].includes(status)) {
+        blockedReason = `No supported next action for agreement status: ${status}`;
+      }
+    }
+
+    return { ...agreement, nextAction, blockedReason };
+  }
+
   /** Full agreement rows for `ids`, newest first, narrowed by the optional filters. */
   private async fetchAgreementsByIds(
     ids: string[],
@@ -500,7 +530,10 @@ export class AgreementsService {
     const { data, error } = await query.order('created_at', { ascending: false });
 
     if (error) return { agreements: [], error: error.message };
-    return { agreements: data ?? [], error: null };
+    return {
+      agreements: (data ?? []).map((agreement) => this.withActionMetadata(agreement)),
+      error: null,
+    };
   }
 
   /**
@@ -556,7 +589,11 @@ export class AgreementsService {
     if (partError) {
       return { agreement, participants: [], error: partError.message };
     }
-    return { agreement, participants: participants ?? [], error: null };
+    return {
+      agreement: this.withActionMetadata(agreement),
+      participants: participants ?? [],
+      error: null,
+    };
   }
 
   async getByContractId(userId: string, contractId: string) {
@@ -586,7 +623,7 @@ export class AgreementsService {
     }
 
     await this.assertCanAccessAgreement(userId, data.id);
-    return { agreement: data, error: null };
+    return { agreement: this.withActionMetadata(data), error: null };
   }
 
   /**
