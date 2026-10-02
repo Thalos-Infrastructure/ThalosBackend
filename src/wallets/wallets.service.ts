@@ -267,13 +267,16 @@ export class WalletsService {
     const { data: existing } = await this.supabase
       .getClient()
       .from('user_wallets')
-      .select('id')
+      .select('*')
       .eq('user_id', userId)
       .eq('wallet_address', dto.wallet_address)
       .maybeSingle();
 
+    // Linking is intentionally idempotent: reconnecting a wallet must not turn a
+    // successful connection into a 409 that makes the client restart its wallet
+    // flow. Ownership is still scoped to this authenticated user by the query.
     if (existing) {
-      throw new ConflictException('Wallet is already linked to your account');
+      return { wallet: existing as UserWallet, error: null };
     }
 
     // Check if this is the first wallet (make it primary)
