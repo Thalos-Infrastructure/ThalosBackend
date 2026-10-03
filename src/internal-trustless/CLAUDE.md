@@ -7,6 +7,13 @@ Authoritative reference: the live OpenAPI spec, not the prose docs.
 `https://dev.api.trustlesswork.com/docs-json` (mainnet: `https://api.trustlesswork.com/docs-json`).
 The narrative docs at docs.trustlesswork.com omit most endpoint paths.
 
+Trustless Work also publishes a skill, vendored at
+`ThalosFrontend/.claude/skills/trustless-work-dev/`. Useful for **protocol semantics** —
+roles, lifecycle, single- vs multi-release rules, trustlines, when fees are deducted. It is
+derived from those same narrative docs, so **this file wins** on endpoint paths, parameter
+names and casing: the skill does not know that `get-escrows-by-signer` takes `signer` rather
+than `address`, or that roles are camelCase upstream.
+
 ## The contract with TW
 
 - Auth is the **`x-api-key` header** (matches the spec's `securitySchemes`).
