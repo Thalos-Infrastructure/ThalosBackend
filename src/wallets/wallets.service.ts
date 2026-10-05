@@ -263,17 +263,26 @@ export class WalletsService {
     userId: string,
     dto: LinkWalletDto,
   ): Promise<{ wallet: UserWallet | null; error: string | null }> {
-    // Check if wallet is already linked to this user
+    // Already linked to THIS user: return it instead of failing.
+    //
+    // The frontend re-attempts this link on every session restore, to heal the
+    // case where the Pollar sign-up persisted a session but not the wallet row.
+    // Answering a repeat with 409 made that self-heal produce a red request on
+    // every page load for every returning user, which is noise that trains
+    // people to ignore the network tab.
+    //
+    // Linking a wallet someone else already holds is a different matter and
+    // still conflicts — see the 23505 branch below.
     const { data: existing } = await this.supabase
       .getClient()
       .from('user_wallets')
-      .select('id')
+      .select('*')
       .eq('user_id', userId)
       .eq('wallet_address', dto.wallet_address)
       .maybeSingle();
 
     if (existing) {
-      throw new ConflictException('Wallet is already linked to your account');
+      return { wallet: existing as UserWallet, error: null };
     }
 
     // Check if this is the first wallet (make it primary)
