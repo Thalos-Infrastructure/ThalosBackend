@@ -23,6 +23,8 @@ interface MockState {
   authUserQueryFails?: boolean;
   /** Columns user_wallets does not have yet; an insert naming one fails PGRST204. */
   missingColumns?: string[];
+  /** A user_wallets row already linking this wallet to THIS user. */
+  existingLink?: Record<string, unknown>;
   inserts: Record<string, unknown>[];
   updates: { table: string; row: Record<string, unknown> }[];
 }
@@ -63,7 +65,8 @@ function makeSupabase(state: MockState): SupabaseService {
               error: null,
             });
           }
-          return Promise.resolve({ data: null, error: null }); // no existing user_wallets link
+          // user_wallets: an existing link for this user, when a test declares one.
+          return Promise.resolve({ data: state.existingLink ?? null, error: null });
         },
         insert: (row: Record<string, unknown>) => {
           state.inserts.push(row);
@@ -399,5 +402,35 @@ describe('WalletsService.linkWallet — accesly identity (#109)', () => {
     expect(state.inserts[1]).not.toHaveProperty('pollar_user_id');
     expect(state.inserts[1]).not.toHaveProperty('c_address');
     expect(wallet).toMatchObject({ wallet_address: G_ADDRESS, wallet_type: 'accesly' });
+  });
+});
+
+describe('WalletsService.linkWallet — relinking the same wallet is not a conflict', () => {
+  it('returns the existing row instead of throwing', async () => {
+    // The frontend re-attempts this link on every session restore to heal a
+    // half-persisted sign-up. Answering a repeat with 409 put a red request in
+    // the network tab on every page load for every returning user.
+    const existing = {
+      id: 'wallet-row-existing',
+      user_id: USER_ID,
+      wallet_address: G_ADDRESS,
+      wallet_type: 'custodial',
+    };
+    const state: MockState = {
+      authUserWallet: G_ADDRESS,
+      authUserPollarId: POLLAR_USER_ID,
+      existingLink: existing,
+      inserts: [],
+      updates: [],
+    };
+    const service = makeService(state);
+
+    const { wallet, error } = await service.linkWallet(USER_ID, pollarCustodialDto());
+
+    expect(error).toBeNull();
+    expect(wallet).toMatchObject({ id: 'wallet-row-existing', wallet_address: G_ADDRESS });
+    // Idempotent: nothing is written a second time.
+    expect(state.inserts).toHaveLength(0);
+    expect(state.updates).toHaveLength(0);
   });
 });
