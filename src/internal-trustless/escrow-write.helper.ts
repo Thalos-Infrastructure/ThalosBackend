@@ -32,10 +32,14 @@ export class TrustlessRelayError extends BadRequestException {
   }
 }
 
-// Defaults de testnet (mismos que usa el frontend); sobreescribibles por env.
-const DEFAULT_PLATFORM_ADDRESS = 'GBTTKTSBLHGMRY3T65JXT423MHQZXTD26TTHQEY5HNF2KWFFDKKVHVPD';
+// Defaults — override with PLATFORM_ADDRESS / DISPUTE_RESOLVER / TRUSTLINE_USDC_ADDRESS.
+// Canonical platform (ops / Manu): GBMJT… — must match FE `lib/config.ts`.
+const DEFAULT_PLATFORM_ADDRESS = 'GBMJTAVJFAKMKLXYXGXACBFGIFS62A7DT46PFHQ3W4RG7CG4HVESSNRY';
 const DEFAULT_DISPUTE_RESOLVER = 'GB6MP3L6UGIDY6O6MXNLSKHLXT2T2TCMPZIZGUTOGYKOLHW7EORWMFCK';
-const DEFAULT_TRUSTLINE_USDC = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
+/** Circle USDC issuer — testnet. */
+const USDC_ISSUER_TESTNET = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
+/** Circle USDC issuer — mainnet. */
+const USDC_ISSUER_MAINNET = 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN';
 
 function getPlatformAddress(): string {
   return process.env.PLATFORM_ADDRESS || DEFAULT_PLATFORM_ADDRESS;
@@ -45,10 +49,16 @@ function getDisputeResolver(): string {
   return process.env.DISPUTE_RESOLVER || DEFAULT_DISPUTE_RESOLVER;
 }
 
+function isMainnet(): boolean {
+  const n = (process.env.STELLAR_NETWORK || 'testnet').toLowerCase();
+  return n === 'mainnet' || n === 'public';
+}
+
 function getTrustline(): { symbol: string; address: string } {
+  const fromEnv = process.env.TRUSTLINE_USDC_ADDRESS;
   return {
     symbol: 'USDC',
-    address: process.env.TRUSTLINE_USDC_ADDRESS || DEFAULT_TRUSTLINE_USDC,
+    address: fromEnv || (isMainnet() ? USDC_ISSUER_MAINNET : USDC_ISSUER_TESTNET),
   };
 }
 
