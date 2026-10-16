@@ -15,6 +15,7 @@ import {
   MILESTONE_STATUS_LABELS,
   isMilestoneStatus,
   normalizeMilestoneStatus,
+  milestoneStatusFromTrustless,
 } from './milestone-status';
 
 describe('MilestoneStatus (canonical enum)', () => {
@@ -62,8 +63,8 @@ describe('MilestoneStatus (canonical enum)', () => {
       expect(normalizeMilestoneStatus(status)).toBe(status);
     });
 
-    it('maps legacy TW "completed" to "released"', () => {
-      expect(normalizeMilestoneStatus('completed')).toBe('released');
+    it('does not treat TW "completed" (evidence delivered) as "released"', () => {
+      expect(normalizeMilestoneStatus('completed')).toBeNull();
     });
 
     it('returns null for completely unknown values', () => {
@@ -89,6 +90,37 @@ describe('MilestoneStatus (canonical enum)', () => {
 
     it('labels are exhaustive (no extra keys)', () => {
       expect(Object.keys(MILESTONE_STATUS_LABELS).sort()).toEqual([...MILESTONE_STATUSES].sort());
+    });
+  });
+
+  describe('milestoneStatusFromTrustless()', () => {
+    it('evidence on an unfunded escrow stays pending (CA6DQZ… on testnet)', () => {
+      expect(milestoneStatusFromTrustless({ status: 'completed', approved: false }, false)).toBe(
+        'pending',
+      );
+    });
+
+    it('is approved once the approver approved, whatever the text says', () => {
+      expect(milestoneStatusFromTrustless({ status: 'completed', approved: true })).toBe(
+        'approved',
+      );
+      expect(milestoneStatusFromTrustless({ status: 'completed', flags: { approved: true } })).toBe(
+        'approved',
+      );
+    });
+
+    it('is released only from a release flag', () => {
+      expect(milestoneStatusFromTrustless({ status: 'completed', flags: { released: true } })).toBe(
+        'released',
+      );
+      // single-release: TW flags the escrow, not the milestone
+      expect(milestoneStatusFromTrustless({ status: 'completed', approved: true }, true)).toBe(
+        'released',
+      );
+    });
+
+    it('keeps an explicit rejection', () => {
+      expect(milestoneStatusFromTrustless({ status: 'rejected' })).toBe('rejected');
     });
   });
 });

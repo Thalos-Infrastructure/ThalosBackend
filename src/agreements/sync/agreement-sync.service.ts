@@ -5,7 +5,7 @@ import { RetryQueueService } from '../../common/retry/retry-queue.service';
 import { AgreementValidationService } from '../validation/agreement-validation.service';
 import { relayToTrustless } from '../../internal-trustless/trustless-relay.helper';
 import { AGREEMENT_EVENTS } from '../../common/events/agreement-events.constants';
-import { normalizeMilestoneStatus } from '../../common/milestone-status';
+import { milestoneStatusFromTrustless } from '../../common/milestone-status';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -22,8 +22,12 @@ export interface TrustlessEscrow {
   milestones?: Array<{
     description: string;
     amount: string;
-    status: 'pending' | 'approved' | 'released';
+    /** Free text set with the evidence (Thalos sends "completed"); not a release signal. */
+    status: string;
+    approved?: boolean;
+    flags?: { approved?: boolean; released?: boolean };
   }>;
+  flags?: { released?: boolean; disputed?: boolean; resolved?: boolean };
 }
 
 export type SyncDirection = 'thalos_to_tw' | 'tw_to_thalos' | 'already_in_sync';
@@ -454,14 +458,10 @@ export class AgreementSyncService {
           }>;
 
           for (let i = 0; i < Math.min(thalosMilestones.length, escrow.milestones.length); i++) {
-            const twStatus = normalizeMilestoneStatus(escrow.milestones[i].status);
-            if (!twStatus) {
-              this.logger.warn(
-                `Skipping unknown TW milestone status "${escrow.milestones[i].status}" ` +
-                  `for agreement ${agreementId}`,
-              );
-              continue;
-            }
+            const twStatus = milestoneStatusFromTrustless(
+              escrow.milestones[i],
+              escrow.flags?.released,
+            );
             const previousStatus = thalosMilestones[i].status;
             if (previousStatus !== twStatus) {
               thalosMilestones[i].status = twStatus;
