@@ -8,6 +8,9 @@ import { TrustlessRelayError } from '../../internal-trustless/escrow-write.helpe
 
 // ── Mock TW write helpers so tests never hit the network ──────────────────
 
+jest.mock('../../internal-trustless/escrow-funding.guard', () => ({
+  assertEscrowFunded: jest.fn().mockResolvedValue(undefined),
+}));
 jest.mock('../../internal-trustless/escrow-write.helper', () => ({
   approveMilestone: jest.fn(),
   changeMilestoneStatus: jest.fn(),

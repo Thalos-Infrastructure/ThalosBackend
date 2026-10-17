@@ -321,10 +321,21 @@ describe('WebhooksService.handleEvent — milestone updates', () => {
     expect(result).toEqual({ handled: true });
   });
 
-  it('escrow.milestone_updated: normalizes legacy TW status "completed" → "released"', async () => {
+  it('escrow.milestone_updated: TW "completed" (evidence delivered) is not stored as "released"', async () => {
     const updateClientMock = milestoneUpdateClient();
     const svc = buildService({
-      getClientCalls: [milestoneSelectClient(agreementData), updateClientMock, insertClient()],
+      getClientCalls: [
+        // Own copy: earlier tests mutate the shared fixture.
+        milestoneSelectClient({
+          id: 'agr-1',
+          milestones: [
+            { description: 'First milestone', amount: '50', status: 'pending' },
+            { description: 'Second milestone', amount: '50', status: 'pending' },
+          ],
+        }),
+        updateClientMock,
+        insertClient(),
+      ],
     });
     const result = await runHandleEventAndProcess(svc, {
       event: 'escrow.milestone_updated',
@@ -332,9 +343,10 @@ describe('WebhooksService.handleEvent — milestone updates', () => {
       milestone: { index: 0, status: 'completed' },
     });
     expect(result).toEqual({ handled: true });
+    // Evidence on an unfunded escrow used to land here as "released".
     expect(updateClientMock.update).toHaveBeenCalledWith({
       milestones: [
-        { description: 'First milestone', amount: '50', status: 'released' },
+        { description: 'First milestone', amount: '50', status: 'pending' },
         { description: 'Second milestone', amount: '50', status: 'pending' },
       ],
       updated_at: expect.any(String),

@@ -6,6 +6,7 @@ import {
   TrustlessRelayError,
 } from '../../internal-trustless/escrow-write.helper';
 import type { ServiceType } from '../../internal-trustless/dto/escrow-write.dto';
+import { assertEscrowFunded } from '../../internal-trustless/escrow-funding.guard';
 import { normalizeMilestoneStatus } from '../../common/milestone-status';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -93,6 +94,8 @@ export class MilestoneSyncService implements OnModuleInit {
         type,
       });
     } else {
+      // Evidence before funding is accepted by the contract, so refuse it here.
+      await assertEscrowFunded(payload.contractId);
       result = await changeMilestoneStatus({
         contractId: payload.contractId,
         milestoneIndex: payload.milestoneIndex,

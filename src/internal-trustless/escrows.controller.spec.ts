@@ -9,6 +9,9 @@ import type {
   ReleaseFundsDto,
 } from './dto/escrow-write.dto';
 
+jest.mock('./escrow-funding.guard', () => ({
+  assertEscrowFunded: jest.fn().mockResolvedValue(undefined),
+}));
 jest.mock('./trustless-relay.helper');
 
 const mockedRelay = relayHelper.relayToTrustless as jest.Mock;

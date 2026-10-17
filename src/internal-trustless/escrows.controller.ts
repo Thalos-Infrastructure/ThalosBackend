@@ -21,6 +21,7 @@ import { RetryQueueService } from '../retry-queue/retry-queue.service';
 import { RetryJobType } from '../retry-queue/retry-queue.types';
 import { relayToTrustless } from './trustless-relay.helper';
 import * as escrowWrite from './escrow-write.helper';
+import { assertEscrowFunded } from './escrow-funding.guard';
 import { RelayRequest, TrustlessRelayError } from './escrow-write.helper';
 import {
   ApproveMilestoneDto,
@@ -223,6 +224,9 @@ export class EscrowsController implements OnModuleInit {
       'POST /escrows/change-milestone-status is deprecated. ' +
         'Use PATCH /v1/agreements/:id/milestones instead (GF-4-BE / #142).',
     );
+
+    // Evidence before funding is accepted by the contract, so refuse it here.
+    await assertEscrowFunded(dto.contractId);
 
     return this.writeWithBackstop(
       RetryJobType.MILESTONE_UPDATE,
