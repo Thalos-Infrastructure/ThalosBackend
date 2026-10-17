@@ -30,6 +30,7 @@ import {
   DisputeMilestoneDto,
   FundEscrowDto,
   ReleaseFundsDto,
+  ResolveDisputeDto,
   SendTransactionDto,
 } from './dto/escrow-write.dto';
 
@@ -259,6 +260,25 @@ export class EscrowsController implements OnModuleInit {
   @ApiOperation({ summary: 'Disputar milestone (devuelve XDR sin firmar)' })
   async disputeMilestone(@Body() dto: DisputeMilestoneDto) {
     return escrowWrite.disputeMilestone(dto);
+  }
+
+  /**
+   * POST /escrows/resolve-dispute
+   * Resolver una disputa distribuyendo los fondos. Devuelve { unsignedTransaction }.
+   *
+   * Only the escrow's disputeResolver can sign the result, and that is checked
+   * on-chain — the same reason the other build endpoints authenticate loosely.
+   * An unsigned XDR moves nothing.
+   */
+  @Post('resolve-dispute')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Resolver disputa distribuyendo fondos (devuelve XDR sin firmar)' })
+  async resolveDispute(@Body() dto: ResolveDisputeDto) {
+    return this.writeWithBackstop(
+      RetryJobType.PAYMENT_EXECUTION,
+      `payment_execution:resolve:${dto.contractId}:${dto.disputeResolver}:${dto.milestoneIndex ?? 'all'}`,
+      escrowWrite.buildResolveDisputeRequest(dto),
+    );
   }
 
   /**
