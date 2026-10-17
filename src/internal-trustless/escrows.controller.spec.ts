@@ -1,6 +1,7 @@
 import { EscrowsController } from './escrows.controller';
 import { RetryJobType } from '../retry-queue/retry-queue.types';
 import * as relayHelper from './trustless-relay.helper';
+import { assertRecipientsCanReceive } from './trustline.guard';
 import type {
   ApproveMilestoneDto,
   ChangeMilestoneStatusDto,
@@ -12,6 +13,9 @@ import type {
 
 jest.mock('./escrow-funding.guard', () => ({
   assertEscrowFunded: jest.fn().mockResolvedValue(undefined),
+}));
+jest.mock('./trustline.guard', () => ({
+  assertRecipientsCanReceive: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock('./trustless-relay.helper');
 
@@ -252,6 +256,7 @@ describe('EscrowsController — resolve dispute', () => {
 
   beforeEach(() => {
     mockedRelay.mockReset();
+    (assertRecipientsCanReceive as jest.Mock).mockReset().mockResolvedValue(undefined);
   });
 
   it('resolves a single-release escrow against resolve-dispute', async () => {
@@ -335,6 +340,28 @@ describe('EscrowsController — resolve dispute', () => {
 
     const keys = enqueue.mock.calls.map((call) => call[2] as string);
     expect(new Set(keys).size).toBe(2);
+  });
+
+  it('checks the recipients before building anything', async () => {
+    // The whole point of checking here: a resolver must not be asked to sign a
+    // transaction that will bounce on submit.
+    (assertRecipientsCanReceive as jest.Mock).mockResolvedValueOnce(undefined);
+    mockedRelay.mockReturnValueOnce(twResponse(200, {}));
+    const { controller } = buildController();
+
+    await controller.resolveDispute(singleRelease());
+
+    expect(assertRecipientsCanReceive).toHaveBeenCalledWith([PAYER, PAYEE]);
+  });
+
+  it('builds no XDR when a recipient cannot receive', async () => {
+    (assertRecipientsCanReceive as jest.Mock).mockRejectedValueOnce(new Error('TRUSTLINE_MISSING'));
+    const { controller, enqueue } = buildController();
+
+    await expect(controller.resolveDispute(singleRelease())).rejects.toThrow('TRUSTLINE_MISSING');
+
+    expect(mockedRelay).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it('passes the distributions through untouched', async () => {

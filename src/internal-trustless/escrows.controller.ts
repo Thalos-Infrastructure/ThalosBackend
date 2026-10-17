@@ -22,6 +22,7 @@ import { RetryJobType } from '../retry-queue/retry-queue.types';
 import { relayToTrustless } from './trustless-relay.helper';
 import * as escrowWrite from './escrow-write.helper';
 import { assertEscrowFunded } from './escrow-funding.guard';
+import { assertRecipientsCanReceive } from './trustline.guard';
 import { RelayRequest, TrustlessRelayError } from './escrow-write.helper';
 import {
   ApproveMilestoneDto,
@@ -274,6 +275,11 @@ export class EscrowsController implements OnModuleInit {
   @HttpCode(200)
   @ApiOperation({ summary: 'Resolver disputa distribuyendo fondos (devuelve XDR sin firmar)' })
   async resolveDispute(@Body() dto: ResolveDisputeDto) {
+    // Before the XDR exists, not after: otherwise the resolver signs a
+    // transaction that bounces on submit, and the funds stay locked with
+    // nothing to act on.
+    await assertRecipientsCanReceive(dto.distributions.map((d) => d.address));
+
     return this.writeWithBackstop(
       RetryJobType.PAYMENT_EXECUTION,
       `payment_execution:resolve:${dto.contractId}:${dto.disputeResolver}:${dto.milestoneIndex ?? 'all'}`,
