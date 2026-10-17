@@ -2,6 +2,7 @@ import { BadRequestException, ServiceUnavailableException } from '@nestjs/common
 import { assertRecipientsCanReceive } from './trustline.guard';
 
 const ISSUER = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
+const ISSUER_MAINNET = 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN';
 const PAYER = 'GPAYER000000000000000000000000000000000000000000000000000';
 const PAYEE = 'GPAYEE000000000000000000000000000000000000000000000000000';
 
@@ -12,13 +13,28 @@ const withTrustline = {
   ],
 };
 const withoutTrustline = { balances: [{ asset_type: 'native', balance: '5' }] };
+const withMainnetTrustline = {
+  balances: [
+    {
+      asset_type: 'credit_alphanum4',
+      asset_code: 'USDC',
+      asset_issuer: ISSUER_MAINNET,
+      balance: '0',
+    },
+  ],
+};
+
+/** `fetch` takes a string, a URL or a Request; only the last one is not a URL. */
+const urlOf = (input: Parameters<typeof fetch>[0]): string =>
+  typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+
+/** The URL the guard asked Horizon for, to check which network it went to. */
+const firstRequestedUrl = (): string => urlOf(jest.mocked(global.fetch).mock.calls[0][0]);
 
 /** Horizon replies keyed by address, so each test says what the ledger holds. */
 function mockHorizon(byAddress: Record<string, { status: number; body?: unknown }>) {
   global.fetch = jest.fn((input: Parameters<typeof fetch>[0]) => {
-    // `input` can be a Request, which stringifies to [object Object].
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const address = url.split('/accounts/')[1];
+    const address = urlOf(input).split('/accounts/')[1];
     const reply = byAddress[address];
     if (!reply) throw new Error(`unexpected address ${address}`);
     return Promise.resolve({
@@ -144,5 +160,57 @@ describe('assertRecipientsCanReceive', () => {
     });
 
     await expect(assertRecipientsCanReceive([PAYEE])).rejects.toThrow(BadRequestException);
+  });
+});
+
+describe('assertRecipientsCanReceive — it follows the network the escrows are built on', () => {
+  const originalFetch = global.fetch;
+  const originalNetwork = process.env.STELLAR_NETWORK;
+  const originalIssuer = process.env.TRUSTLINE_USDC_ADDRESS;
+
+  beforeEach(() => {
+    // No override: the issuer must then be the one escrow creation would pick.
+    delete process.env.TRUSTLINE_USDC_ADDRESS;
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    process.env.STELLAR_NETWORK = originalNetwork;
+    process.env.TRUSTLINE_USDC_ADDRESS = originalIssuer;
+    jest.restoreAllMocks();
+  });
+
+  it('accepts the mainnet issuer on mainnet, and reads mainnet Horizon', async () => {
+    // Resolving against the testnet issuer here would report every recipient
+    // as missing a trustline and refuse every resolution on mainnet.
+    process.env.STELLAR_NETWORK = 'mainnet';
+    mockHorizon({ [PAYEE]: { status: 200, body: withMainnetTrustline } });
+
+    await expect(assertRecipientsCanReceive([PAYEE])).resolves.toBeUndefined();
+    expect(firstRequestedUrl()).toContain('https://horizon.stellar.org/');
+  });
+
+  it("treats 'public' as mainnet, like escrow creation does", async () => {
+    process.env.STELLAR_NETWORK = 'public';
+    mockHorizon({ [PAYEE]: { status: 200, body: withMainnetTrustline } });
+
+    await expect(assertRecipientsCanReceive([PAYEE])).resolves.toBeUndefined();
+    expect(firstRequestedUrl()).toContain('https://horizon.stellar.org/');
+  });
+
+  it('rejects the mainnet issuer on testnet, and reads testnet Horizon', async () => {
+    process.env.STELLAR_NETWORK = 'testnet';
+    mockHorizon({ [PAYEE]: { status: 200, body: withMainnetTrustline } });
+
+    await expect(assertRecipientsCanReceive([PAYEE])).rejects.toThrow(BadRequestException);
+    expect(firstRequestedUrl()).toContain('https://horizon-testnet.stellar.org/');
+  });
+
+  it('honours an explicit TRUSTLINE_USDC_ADDRESS over the network default', async () => {
+    process.env.STELLAR_NETWORK = 'testnet';
+    process.env.TRUSTLINE_USDC_ADDRESS = ISSUER_MAINNET;
+    mockHorizon({ [PAYEE]: { status: 200, body: withMainnetTrustline } });
+
+    await expect(assertRecipientsCanReceive([PAYEE])).resolves.toBeUndefined();
   });
 });

@@ -338,7 +338,7 @@ describe('EscrowsController — resolve dispute', () => {
       }),
     ).rejects.toThrow();
 
-    const keys = enqueue.mock.calls.map((call) => call[2] as string);
+    const keys = (enqueue.mock.calls as unknown[][]).map((call) => call[2] as string);
     expect(new Set(keys).size).toBe(2);
   });
 

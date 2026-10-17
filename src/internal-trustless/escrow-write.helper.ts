@@ -50,12 +50,12 @@ function getDisputeResolver(): string {
   return process.env.DISPUTE_RESOLVER || DEFAULT_DISPUTE_RESOLVER;
 }
 
-function isMainnet(): boolean {
+export function isMainnet(): boolean {
   const n = (process.env.STELLAR_NETWORK || 'testnet').toLowerCase();
   return n === 'mainnet' || n === 'public';
 }
 
-function getTrustline(): { symbol: string; address: string } {
+export function getTrustline(): { symbol: string; address: string } {
   const fromEnv = process.env.TRUSTLINE_USDC_ADDRESS;
   return {
     symbol: 'USDC',

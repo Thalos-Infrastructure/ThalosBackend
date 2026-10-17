@@ -1,4 +1,5 @@
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
+import { getTrustline, isMainnet } from './escrow-write.helper';
 
 /**
  * Funds cannot reach an address that does not hold the asset's trustline.
@@ -19,17 +20,20 @@ import { BadRequestException, ServiceUnavailableException } from '@nestjs/common
 
 const HORIZON_TIMEOUT_MS = 10_000;
 
-/** Same issuer the escrow-write helper puts on every escrow this app creates. */
+/**
+ * The issuer comes from the escrow-write helper rather than being resolved
+ * again here: it is the one the app actually puts on every escrow it creates,
+ * and it differs by network. Reading `TRUSTLINE_USDC_ADDRESS` separately would
+ * check the testnet issuer against a mainnet escrow and report every recipient
+ * as missing a trustline.
+ */
 function usdcIssuer(): string {
-  return (
-    process.env.TRUSTLINE_USDC_ADDRESS || 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5'
-  );
+  return getTrustline().address;
 }
 
+/** Same network the escrows are created on — `isMainnet` also accepts `public`. */
 function horizonUrl(): string {
-  return process.env.STELLAR_NETWORK === 'mainnet'
-    ? 'https://horizon.stellar.org'
-    : 'https://horizon-testnet.stellar.org';
+  return isMainnet() ? 'https://horizon.stellar.org' : 'https://horizon-testnet.stellar.org';
 }
 
 interface HorizonBalance {
