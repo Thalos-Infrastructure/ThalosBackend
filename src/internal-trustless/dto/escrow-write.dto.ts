@@ -177,6 +177,45 @@ export class DisputeMilestoneDto {
   signer: string;
 }
 
+/* ---------------- Resolve dispute ---------------- */
+
+export class DistributionDto {
+  /** Stellar address receiving this share. It must already hold a USDC trustline. */
+  @IsString()
+  address: string;
+
+  /** Absolute amount, not a percentage. Built by `buildDistributions`. */
+  @IsNumber()
+  amount: number;
+}
+
+export class ResolveDisputeDto {
+  @IsString()
+  contractId: string;
+
+  @IsIn(SERVICE_TYPES)
+  type: ServiceType;
+
+  /** Required for multi-release (identifies the milestone); ignored for single-release. */
+  @ValidateIf((o: ResolveDisputeDto) => o.type === 'multi-release')
+  @IsString()
+  milestoneIndex?: string;
+
+  /** Must be the escrow's disputeResolver; the signature is checked on-chain. */
+  @IsString()
+  disputeResolver: string;
+
+  /**
+   * Where the funds go. Single-release must total the escrow balance exactly;
+   * multi-release must not exceed the milestone amount. The caller builds this
+   * with `buildDistributions`, which enforces both.
+   */
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DistributionDto)
+  distributions: DistributionDto[];
+}
+
 /* ---------------- Send signed transaction ---------------- */
 
 export class SendTransactionDto {

@@ -8,6 +8,7 @@ import type {
   DisputeMilestoneDto,
   FundEscrowDto,
   ReleaseFundsDto,
+  ResolveDisputeDto,
   SendTransactionDto,
   ServiceType,
 } from './dto/escrow-write.dto';
@@ -49,12 +50,12 @@ function getDisputeResolver(): string {
   return process.env.DISPUTE_RESOLVER || DEFAULT_DISPUTE_RESOLVER;
 }
 
-function isMainnet(): boolean {
+export function isMainnet(): boolean {
   const n = (process.env.STELLAR_NETWORK || 'testnet').toLowerCase();
   return n === 'mainnet' || n === 'public';
 }
 
-function getTrustline(): { symbol: string; address: string } {
+export function getTrustline(): { symbol: string; address: string } {
   const fromEnv = process.env.TRUSTLINE_USDC_ADDRESS;
   return {
     symbol: 'USDC',
@@ -273,6 +274,43 @@ export function disputeMilestone(dto: DisputeMilestoneDto): Promise<unknown> {
     milestoneIndex: dto.milestoneIndex,
     signer: dto.signer,
   });
+}
+
+/**
+ * Resolve a dispute by distributing the funds.
+ *
+ * TW splits this by escrow type the same way `dispute` does: single-release
+ * resolves the whole escrow, multi-release resolves one milestone.
+ *
+ * `distributions` carries absolute amounts, already checked against the rule
+ * for this escrow type by `buildDistributions` in `src/disputes`. Every address
+ * in it needs a USDC trustline or the funds cannot reach it.
+ */
+export function buildResolveDisputeRequest(dto: ResolveDisputeDto): RelayRequest {
+  const distributions = dto.distributions.map((d) => ({
+    address: d.address,
+    amount: d.amount,
+  }));
+
+  if (dto.type === 'single-release') {
+    return {
+      path: 'escrow/single-release/resolve-dispute',
+      body: {
+        contractId: dto.contractId,
+        disputeResolver: dto.disputeResolver,
+        distributions,
+      },
+    };
+  }
+  return {
+    path: 'escrow/multi-release/resolve-milestone-dispute',
+    body: {
+      contractId: dto.contractId,
+      milestoneIndex: dto.milestoneIndex,
+      disputeResolver: dto.disputeResolver,
+      distributions,
+    },
+  };
 }
 
 export function sendTransaction(dto: SendTransactionDto): Promise<unknown> {
