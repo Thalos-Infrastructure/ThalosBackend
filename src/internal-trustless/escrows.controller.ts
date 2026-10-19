@@ -23,6 +23,13 @@ import { relayToTrustless } from './trustless-relay.helper';
 import * as escrowWrite from './escrow-write.helper';
 import { assertEscrowFunded } from './escrow-funding.guard';
 import { assertRecipientsCanReceive } from './trustline.guard';
+import {
+  assertResolvable,
+  readEscrow,
+  resolutionTotal,
+  type EscrowSnapshot,
+} from './escrow-read.helper';
+import { buildDistributions, DistributionError } from '../disputes/dispute-distributions';
 import { RelayRequest, TrustlessRelayError } from './escrow-write.helper';
 import {
   ApproveMilestoneDto,
@@ -156,6 +163,29 @@ export class EscrowsController implements OnModuleInit {
   }
 
   /**
+   * GET /escrows/by-contract-id?contractId=...
+   *
+   * One escrow, parsed into a stable shape. Public for the same reason as the
+   * other two reads: escrow state is public on-chain and nothing here is bound
+   * to a user.
+   *
+   * It exists because a dispute resolution needs the escrow's live balance, its
+   * role addresses and its asset, and the alternative — paging `by-role` until
+   * the contract turns up — reads several escrows to find one and silently
+   * misses it past the first page.
+   */
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Get('by-contract-id')
+  async getEscrowByContractId(@Query('contractId') contractId: string) {
+    if (!contractId?.trim()) {
+      throw new BadRequestException('`contractId` is required');
+    }
+    return readEscrow(contractId.trim());
+  }
+
+  /**
    * POST /escrows/create
    * Deploy un nuevo escrow (single o multi release). Devuelve { unsignedTransaction }.
    */
@@ -275,16 +305,46 @@ export class EscrowsController implements OnModuleInit {
   @HttpCode(200)
   @ApiOperation({ summary: 'Resolver disputa distribuyendo fondos (devuelve XDR sin firmar)' })
   async resolveDispute(@Body() dto: ResolveDisputeDto) {
-    // Before the XDR exists, not after: otherwise the resolver signs a
-    // transaction that bounces on submit, and the funds stay locked with
-    // nothing to act on.
-    await assertRecipientsCanReceive(dto.distributions.map((d) => d.address));
+    // Everything that can refuse this resolution runs before the XDR exists.
+    // After it, the only thing left is the resolver's signature, and a
+    // transaction that bounces on submit spends that signature on nothing and
+    // leaves the funds locked with no reason anyone can act on.
+    const escrow = await readEscrow(dto.contractId);
+    assertResolvable(escrow, dto);
+
+    const distributions = EscrowsController.splitByPercentage(dto, escrow);
+    await assertRecipientsCanReceive(
+      distributions.map((d) => d.address),
+      escrow.trustline,
+    );
 
     return this.writeWithBackstop(
       RetryJobType.PAYMENT_EXECUTION,
       `payment_execution:resolve:${dto.contractId}:${dto.disputeResolver}:${dto.milestoneIndex ?? 'all'}`,
-      escrowWrite.buildResolveDisputeRequest(dto),
+      escrowWrite.buildResolveDisputeRequest(dto, distributions),
     );
+  }
+
+  /**
+   * Percentages to amounts, against what this escrow type actually splits.
+   *
+   * `DistributionError` means the request itself is wrong — percentages that do
+   * not total 100, an address twice, an empty escrow — so it is a 400 with the
+   * reason, not the 500 an unmapped error would produce.
+   */
+  private static splitByPercentage(dto: ResolveDisputeDto, escrow: EscrowSnapshot) {
+    try {
+      return buildDistributions({
+        escrowType: dto.type,
+        total: resolutionTotal(escrow, dto.type, dto.milestoneIndex),
+        allocations: dto.allocations,
+      });
+    } catch (error) {
+      if (error instanceof DistributionError) {
+        throw new BadRequestException({ message: error.message, code: 'INVALID_DISTRIBUTION' });
+      }
+      throw error;
+    }
   }
 
   /**

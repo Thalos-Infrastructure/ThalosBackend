@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { relayToTrustless } from './trustless-relay.helper';
 import { validateAgreement } from '../agreements/agreement.validator';
+import type { Distribution } from '../disputes/dispute-distributions';
 import type {
   ApproveMilestoneDto,
   ChangeMilestoneStatusDto,
@@ -282,16 +283,16 @@ export function disputeMilestone(dto: DisputeMilestoneDto): Promise<unknown> {
  * TW splits this by escrow type the same way `dispute` does: single-release
  * resolves the whole escrow, multi-release resolves one milestone.
  *
- * `distributions` carries absolute amounts, already checked against the rule
- * for this escrow type by `buildDistributions` in `src/disputes`. Every address
- * in it needs a USDC trustline or the funds cannot reach it.
+ * `distributions` carries absolute amounts and is passed in rather than read
+ * off the DTO: the DTO speaks percentages, and turning those into amounts needs
+ * the escrow's balance, which this pure builder has no business fetching. Every
+ * address in it needs a trustline for the escrow's asset, or the funds cannot
+ * reach it.
  */
-export function buildResolveDisputeRequest(dto: ResolveDisputeDto): RelayRequest {
-  const distributions = dto.distributions.map((d) => ({
-    address: d.address,
-    amount: d.amount,
-  }));
-
+export function buildResolveDisputeRequest(
+  dto: ResolveDisputeDto,
+  distributions: Distribution[],
+): RelayRequest {
   if (dto.type === 'single-release') {
     return {
       path: 'escrow/single-release/resolve-dispute',
