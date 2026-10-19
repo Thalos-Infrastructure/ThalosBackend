@@ -231,11 +231,32 @@ export function assertResolvable(
     throw new BadRequestException('This dispute was already resolved on-chain.');
   }
 
-  // Single-release carries the dispute on the escrow itself. Multi-release
-  // carries it per milestone, and that flag is not verified here yet: it is
-  // what the multi-release work covers, and refusing on a shape this code has
-  // not seen would block resolutions that are perfectly valid.
-  if (dto.type === 'single-release' && !escrow.flags.disputed) {
-    throw new BadRequestException('This escrow is not in dispute, so there is nothing to resolve.');
+  // Single-release carries the dispute on the escrow itself; multi-release
+  // carries it on the milestone being resolved.
+  if (dto.type === 'single-release') {
+    if (!escrow.flags.disputed) {
+      throw new BadRequestException(
+        'This escrow is not in dispute, so there is nothing to resolve.',
+      );
+    }
+    return;
+  }
+
+  const milestone = escrow.milestones[Number(dto.milestoneIndex)];
+  // The index itself is checked in `resolutionTotal`; there is nothing to say
+  // here about one that names no milestone.
+  if (!milestone) return;
+
+  if (milestone.flags?.released || milestone.flags?.resolved) {
+    throw new BadRequestException(`Milestone ${dto.milestoneIndex} is already settled.`);
+  }
+
+  // Only refuse when the escrow actually reports the flags. A milestone that
+  // carries none says nothing about its dispute either way, and refusing on
+  // silence would block resolutions that are perfectly valid.
+  if (milestone.flags && !milestone.flags.disputed) {
+    throw new BadRequestException(
+      `Milestone ${dto.milestoneIndex} is not in dispute, so there is nothing to resolve.`,
+    );
   }
 }

@@ -232,16 +232,53 @@ describe('assertResolvable', () => {
     );
   });
 
-  it('does not require the dispute flag on multi-release yet', () => {
-    // Multi-release carries the dispute per milestone. Refusing on a shape this
-    // code has not seen would block resolutions that are perfectly valid.
-    const escrow = snapshot({
-      type: 'multi-release',
-      flags: { disputed: false, released: false, resolved: false },
+  describe('multi-release carries the dispute on the milestone', () => {
+    const multi = (flags?: Record<string, boolean>) =>
+      snapshot({
+        type: 'multi-release',
+        // The escrow-level flag stays false: on multi-release it is the
+        // milestone that is disputed, so reading the escrow's own flag would
+        // refuse every valid resolution.
+        flags: { disputed: false, released: false, resolved: false },
+        milestones: [{ amount: 10, ...(flags ? { flags } : {}) }],
+      });
+
+    const dto = { type: 'multi-release' as const, disputeResolver: RESOLVER, milestoneIndex: '0' };
+
+    it('allows a disputed milestone', () => {
+      expect(() =>
+        assertResolvable(multi({ disputed: true, released: false, resolved: false }), dto),
+      ).not.toThrow();
     });
 
-    expect(() =>
-      assertResolvable(escrow, { type: 'multi-release', disputeResolver: RESOLVER }),
-    ).not.toThrow();
+    it('refuses a milestone nobody disputed', () => {
+      expect(() =>
+        assertResolvable(multi({ disputed: false, released: false, resolved: false }), dto),
+      ).toThrow(/not in dispute/);
+    });
+
+    it('refuses a milestone already settled', () => {
+      for (const flags of [
+        { disputed: true, released: true, resolved: false },
+        { disputed: true, released: false, resolved: true },
+      ]) {
+        expect(() => assertResolvable(multi(flags), dto)).toThrow(/already settled/);
+      }
+    });
+
+    it('allows a milestone that reports no flags at all', () => {
+      // Silence is not a refusal: an escrow shape this code has not seen must
+      // not block a resolution that is perfectly valid.
+      expect(() => assertResolvable(multi(), dto)).not.toThrow();
+    });
+
+    it('leaves an out-of-range index to resolutionTotal', () => {
+      expect(() =>
+        assertResolvable(multi({ disputed: true, released: false, resolved: false }), {
+          ...dto,
+          milestoneIndex: '9',
+        }),
+      ).not.toThrow();
+    });
   });
 });
