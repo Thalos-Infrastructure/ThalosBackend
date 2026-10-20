@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { relayToTrustless } from './trustless-relay.helper';
 import { validateAgreement } from '../agreements/agreement.validator';
+import type { Distribution } from '../disputes/dispute-distributions';
 import type {
   ApproveMilestoneDto,
   ChangeMilestoneStatusDto,
@@ -8,6 +9,7 @@ import type {
   DisputeMilestoneDto,
   FundEscrowDto,
   ReleaseFundsDto,
+  ResolveDisputeDto,
   SendTransactionDto,
   ServiceType,
 } from './dto/escrow-write.dto';
@@ -49,12 +51,12 @@ function getDisputeResolver(): string {
   return process.env.DISPUTE_RESOLVER || DEFAULT_DISPUTE_RESOLVER;
 }
 
-function isMainnet(): boolean {
+export function isMainnet(): boolean {
   const n = (process.env.STELLAR_NETWORK || 'testnet').toLowerCase();
   return n === 'mainnet' || n === 'public';
 }
 
-function getTrustline(): { symbol: string; address: string } {
+export function getTrustline(): { symbol: string; address: string } {
   const fromEnv = process.env.TRUSTLINE_USDC_ADDRESS;
   return {
     symbol: 'USDC',
@@ -273,6 +275,43 @@ export function disputeMilestone(dto: DisputeMilestoneDto): Promise<unknown> {
     milestoneIndex: dto.milestoneIndex,
     signer: dto.signer,
   });
+}
+
+/**
+ * Resolve a dispute by distributing the funds.
+ *
+ * TW splits this by escrow type the same way `dispute` does: single-release
+ * resolves the whole escrow, multi-release resolves one milestone.
+ *
+ * `distributions` carries absolute amounts and is passed in rather than read
+ * off the DTO: the DTO speaks percentages, and turning those into amounts needs
+ * the escrow's balance, which this pure builder has no business fetching. Every
+ * address in it needs a trustline for the escrow's asset, or the funds cannot
+ * reach it.
+ */
+export function buildResolveDisputeRequest(
+  dto: ResolveDisputeDto,
+  distributions: Distribution[],
+): RelayRequest {
+  if (dto.type === 'single-release') {
+    return {
+      path: 'escrow/single-release/resolve-dispute',
+      body: {
+        contractId: dto.contractId,
+        disputeResolver: dto.disputeResolver,
+        distributions,
+      },
+    };
+  }
+  return {
+    path: 'escrow/multi-release/resolve-milestone-dispute',
+    body: {
+      contractId: dto.contractId,
+      milestoneIndex: dto.milestoneIndex,
+      disputeResolver: dto.disputeResolver,
+      distributions,
+    },
+  };
 }
 
 export function sendTransaction(dto: SendTransactionDto): Promise<unknown> {

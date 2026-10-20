@@ -177,6 +177,53 @@ export class DisputeMilestoneDto {
   signer: string;
 }
 
+/* ---------------- Resolve dispute ---------------- */
+
+export class AllocationDto {
+  /** Stellar address that receives this share. It must already hold a trustline. */
+  @IsString()
+  address: string;
+
+  /**
+   * 0-100. The set must total 100.
+   *
+   * A percentage, not an amount: the resolver decides "60/40", and only the
+   * server knows the escrow's balance to turn that into stroops. See
+   * `src/disputes/dispute-distributions.ts`.
+   */
+  @IsNumber()
+  percentage: number;
+}
+
+export class ResolveDisputeDto {
+  @IsString()
+  contractId: string;
+
+  @IsIn(SERVICE_TYPES)
+  type: ServiceType;
+
+  /** Required for multi-release (identifies the milestone); ignored for single-release. */
+  @ValidateIf((o: ResolveDisputeDto) => o.type === 'multi-release')
+  @IsString()
+  milestoneIndex?: string;
+
+  /** Must be the escrow's disputeResolver; also checked on-chain. */
+  @IsString()
+  disputeResolver: string;
+
+  /**
+   * How the disputed funds are split, in percentages.
+   *
+   * The server reads the escrow to learn what they are percentages of — the
+   * balance for single-release, the milestone amount for multi-release — and
+   * converts them to absolute amounts with `buildDistributions`.
+   */
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AllocationDto)
+  allocations: AllocationDto[];
+}
+
 /* ---------------- Send signed transaction ---------------- */
 
 export class SendTransactionDto {
