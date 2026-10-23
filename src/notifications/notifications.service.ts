@@ -41,6 +41,15 @@ const DEFAULT_FROM_EMAIL = 'Thalos <notifications@thalosplatform.xyz>';
 const DEFAULT_REPLY_TO = 'Thalos <no-reply@thalosplatform.xyz>';
 
 /**
+ * The domain part of an `EMAIL_FROM`, which may be a bare address or the
+ * `Name <address>` form. Resend verifies domains, not addresses.
+ */
+function senderDomainOf(from: string): string {
+  const address = from.includes('<') ? from.slice(from.indexOf('<') + 1, from.indexOf('>')) : from;
+  return address.split('@').pop()?.trim().toLowerCase() ?? '';
+}
+
+/**
  * Read an env var via ConfigService, trimming whitespace, falling back to
  * `fallback` when unset or blank. Centralised so tests can rely on the same
  * parsing rules as production.
@@ -74,7 +83,60 @@ export class NotificationsService implements OnModuleInit {
       return;
     }
     this.resend = new Resend(apiKey);
-    this.logger.log('Resend email client initialized');
+    // Deliberately not awaited: a slow provider must not hold up boot. The
+    // result is a log line, not a gate.
+    void this.verifyEmailSetup();
+  }
+
+  /**
+   * Say out loud, at boot, whether this service can actually send email.
+   *
+   * `new Resend(key)` validates nothing, so the old
+   * `Resend email client initialized` was printed just the same with a dead
+   * key — which is exactly what happened: production ran for months with an
+   * invalid key, rejecting every send, and the only trace was a per-send error
+   * line nobody was reading.
+   *
+   * Listing domains is the cheapest call that exercises the key and, in the
+   * same response, says whether the sender's domain is verified. An
+   * unverified domain is refused by Resend just as firmly as a bad key.
+   */
+  private async verifyEmailSetup(): Promise<void> {
+    try {
+      const { data, error } = await this.resend.domains.list();
+
+      if (error) {
+        this.logger.error(
+          `Resend rejected the API key (${error.message}). No email will be sent until RESEND_API_KEY is replaced.`,
+        );
+        return;
+      }
+
+      const domains = data?.data ?? [];
+      const senderDomain = senderDomainOf(this.fromEmail);
+      const match = domains.find((d) => d.name?.toLowerCase() === senderDomain);
+
+      if (!match) {
+        this.logger.error(
+          `Resend accepted the API key, but "${senderDomain}" (from EMAIL_FROM) is not one of its domains ` +
+            `[${domains.map((d) => d.name).join(', ') || 'none'}]. Sends from that address will be refused.`,
+        );
+        return;
+      }
+
+      if (match.status !== 'verified') {
+        this.logger.error(
+          `Resend domain "${senderDomain}" is "${match.status}", not verified. Sends will be refused until its DNS records are confirmed.`,
+        );
+        return;
+      }
+
+      this.logger.log(`Resend ready: API key valid, "${senderDomain}" verified`);
+    } catch (err) {
+      // Reaching Resend is not a precondition for the app to run, so this is
+      // reported and dropped.
+      this.logger.error('Could not verify the Resend setup at startup', err);
+    }
   }
 
   /**
@@ -129,19 +191,78 @@ export class NotificationsService implements OnModuleInit {
   }
 
   /**
+   * Record what happened with a notification, so "are the emails going out?"
+   * is a query instead of an investigation.
+   *
+   * Never throws and never blocks the caller: a logging table that can break
+   * sending is worse than no logging table. A failure to write the row is
+   * itself logged and dropped.
+   */
+  private async recordNotification(entry: {
+    status: 'sent' | 'failed' | 'skipped';
+    eventType: string;
+    subject?: string;
+    recipients?: string[];
+    agreementId?: string;
+    errorMessage?: string;
+  }): Promise<void> {
+    try {
+      const rows = (entry.recipients?.length ? entry.recipients : [null]).map((email) => ({
+        agreement_id: entry.agreementId ?? null,
+        event_type: entry.eventType,
+        channel: 'email',
+        recipient_email: email,
+        subject: entry.subject ?? null,
+        status: entry.status,
+        error_message: entry.errorMessage ?? null,
+      }));
+
+      const { error } = await this.supabase.getClient().from('notification_logs').insert(rows);
+      if (error) {
+        this.logger.warn(`Could not record notification: ${error.message}`);
+      }
+    } catch (err) {
+      this.logger.warn('Could not record notification', err);
+    }
+  }
+
+  /**
    * Send email using Resend. Mirrors the frontend payload shape (`replyTo`
    * always present, never undefined, so Resend's API contract is satisfied
    * even when only `from` is overridden).
+   *
+   * Every outcome is recorded in `notification_logs`, including the ones that
+   * never reach the provider. "No recipients" and "the key is dead" both used
+   * to look identical from outside: nothing happened, and nothing said why.
    */
-  private async sendEmail(to: string | string[], subject: string, html: string): Promise<boolean> {
+  private async sendEmail(
+    to: string | string[],
+    subject: string,
+    html: string,
+    context: { eventType: string; agreementId?: string } = { eventType: 'unknown' },
+  ): Promise<boolean> {
+    const recipients = Array.isArray(to) ? to : [to];
+
     if (!this.resend) {
       this.logger.warn('Resend not configured, skipping email');
+      await this.recordNotification({
+        ...context,
+        status: 'skipped',
+        subject,
+        recipients,
+        errorMessage: 'RESEND_API_KEY not configured',
+      });
       return false;
     }
 
-    const recipients = Array.isArray(to) ? to : [to];
     if (recipients.length === 0) {
       this.logger.debug('No recipients, skipping email');
+      await this.recordNotification({
+        ...context,
+        status: 'skipped',
+        subject,
+        errorMessage: 'No recipient had an email address on their profile',
+      });
       return false;
     }
 
@@ -156,13 +277,28 @@ export class NotificationsService implements OnModuleInit {
 
       if (error) {
         this.logger.error(`Failed to send email: ${error.message}`);
+        await this.recordNotification({
+          ...context,
+          status: 'failed',
+          subject,
+          recipients,
+          errorMessage: error.message,
+        });
         return false;
       }
 
       this.logger.log(`Email sent to ${recipients.length} recipient(s): ${subject}`);
+      await this.recordNotification({ ...context, status: 'sent', subject, recipients });
       return true;
     } catch (err) {
       this.logger.error('Error sending email', err);
+      await this.recordNotification({
+        ...context,
+        status: 'failed',
+        subject,
+        recipients,
+        errorMessage: err instanceof Error ? err.message : 'Unknown error',
+      });
       return false;
     }
   }
@@ -172,10 +308,24 @@ export class NotificationsService implements OnModuleInit {
    */
   async notifyAgreementCreated(data: AgreementCreatedData): Promise<void> {
     const emails = await this.getParticipantEmails(data.agreementId);
-    if (emails.length === 0) return;
+    if (emails.length === 0) {
+      // Recorded, not just dropped: "nobody has an email on file" is the
+      // most common reason a notification never arrives, and it used to
+      // leave no trace at all.
+      await this.recordNotification({
+        eventType: 'agreement_created',
+        agreementId: data.agreementId,
+        status: 'skipped',
+        errorMessage: 'No participant had an email address on their profile',
+      });
+      return;
+    }
 
     const html = agreementCreatedTemplate(data);
-    await this.sendEmail(emails, `New Agreement Created: ${data.title}`, html);
+    await this.sendEmail(emails, `New Agreement Created: ${data.title}`, html, {
+      eventType: 'agreement_created',
+      agreementId: data.agreementId,
+    });
   }
 
   /**
@@ -183,10 +333,24 @@ export class NotificationsService implements OnModuleInit {
    */
   async notifyAgreementFunded(data: AgreementFundedData): Promise<void> {
     const emails = await this.getParticipantEmails(data.agreementId);
-    if (emails.length === 0) return;
+    if (emails.length === 0) {
+      // Recorded, not just dropped: "nobody has an email on file" is the
+      // most common reason a notification never arrives, and it used to
+      // leave no trace at all.
+      await this.recordNotification({
+        eventType: 'agreement_funded',
+        agreementId: data.agreementId,
+        status: 'skipped',
+        errorMessage: 'No participant had an email address on their profile',
+      });
+      return;
+    }
 
     const html = agreementFundedTemplate(data);
-    await this.sendEmail(emails, `Agreement Funded: ${data.title}`, html);
+    await this.sendEmail(emails, `Agreement Funded: ${data.title}`, html, {
+      eventType: 'agreement_funded',
+      agreementId: data.agreementId,
+    });
   }
 
   /**
@@ -197,10 +361,24 @@ export class NotificationsService implements OnModuleInit {
     excludedWallet?: string,
   ): Promise<void> {
     const emails = await this.getParticipantEmails(data.agreementId, excludedWallet);
-    if (emails.length === 0) return;
+    if (emails.length === 0) {
+      // Recorded, not just dropped: "nobody has an email on file" is the
+      // most common reason a notification never arrives, and it used to
+      // leave no trace at all.
+      await this.recordNotification({
+        eventType: 'evidence_submitted',
+        agreementId: data.agreementId,
+        status: 'skipped',
+        errorMessage: 'No participant had an email address on their profile',
+      });
+      return;
+    }
 
     const html = evidenceSubmittedTemplate(data);
-    await this.sendEmail(emails, `Evidence Submitted: ${data.agreementTitle}`, html);
+    await this.sendEmail(emails, `Evidence Submitted: ${data.agreementTitle}`, html, {
+      eventType: 'evidence_submitted',
+      agreementId: data.agreementId,
+    });
   }
 
   /**
@@ -208,10 +386,24 @@ export class NotificationsService implements OnModuleInit {
    */
   async notifyMilestoneApproved(data: MilestoneApprovedData): Promise<void> {
     const emails = await this.getParticipantEmails(data.agreementId);
-    if (emails.length === 0) return;
+    if (emails.length === 0) {
+      // Recorded, not just dropped: "nobody has an email on file" is the
+      // most common reason a notification never arrives, and it used to
+      // leave no trace at all.
+      await this.recordNotification({
+        eventType: 'milestone_approved',
+        agreementId: data.agreementId,
+        status: 'skipped',
+        errorMessage: 'No participant had an email address on their profile',
+      });
+      return;
+    }
 
     const html = milestoneApprovedTemplate(data);
-    await this.sendEmail(emails, `Milestone Approved: ${data.milestoneDescription}`, html);
+    await this.sendEmail(emails, `Milestone Approved: ${data.milestoneDescription}`, html, {
+      eventType: 'milestone_approved',
+      agreementId: data.agreementId,
+    });
   }
 
   /**
@@ -219,10 +411,24 @@ export class NotificationsService implements OnModuleInit {
    */
   async notifyMilestoneReleased(data: MilestoneReleasedData): Promise<void> {
     const emails = await this.getParticipantEmails(data.agreementId);
-    if (emails.length === 0) return;
+    if (emails.length === 0) {
+      // Recorded, not just dropped: "nobody has an email on file" is the
+      // most common reason a notification never arrives, and it used to
+      // leave no trace at all.
+      await this.recordNotification({
+        eventType: 'milestone_released',
+        agreementId: data.agreementId,
+        status: 'skipped',
+        errorMessage: 'No participant had an email address on their profile',
+      });
+      return;
+    }
 
     const html = milestoneReleasedTemplate(data);
-    await this.sendEmail(emails, `Payment Released: ${data.milestoneDescription}`, html);
+    await this.sendEmail(emails, `Payment Released: ${data.milestoneDescription}`, html, {
+      eventType: 'milestone_released',
+      agreementId: data.agreementId,
+    });
   }
 
   /**
@@ -230,10 +436,24 @@ export class NotificationsService implements OnModuleInit {
    */
   async notifyDisputeOpened(data: DisputeOpenedData): Promise<void> {
     const emails = await this.getParticipantEmails(data.agreementId);
-    if (emails.length === 0) return;
+    if (emails.length === 0) {
+      // Recorded, not just dropped: "nobody has an email on file" is the
+      // most common reason a notification never arrives, and it used to
+      // leave no trace at all.
+      await this.recordNotification({
+        eventType: 'dispute_opened',
+        agreementId: data.agreementId,
+        status: 'skipped',
+        errorMessage: 'No participant had an email address on their profile',
+      });
+      return;
+    }
 
     const html = disputeOpenedTemplate(data);
-    await this.sendEmail(emails, `Dispute Opened: ${data.agreementTitle}`, html);
+    await this.sendEmail(emails, `Dispute Opened: ${data.agreementTitle}`, html, {
+      eventType: 'dispute_opened',
+      agreementId: data.agreementId,
+    });
   }
 
   /**
@@ -241,10 +461,24 @@ export class NotificationsService implements OnModuleInit {
    */
   async notifyDisputeResolved(data: DisputeResolvedData): Promise<void> {
     const emails = await this.getParticipantEmails(data.agreementId);
-    if (emails.length === 0) return;
+    if (emails.length === 0) {
+      // Recorded, not just dropped: "nobody has an email on file" is the
+      // most common reason a notification never arrives, and it used to
+      // leave no trace at all.
+      await this.recordNotification({
+        eventType: 'dispute_resolved',
+        agreementId: data.agreementId,
+        status: 'skipped',
+        errorMessage: 'No participant had an email address on their profile',
+      });
+      return;
+    }
 
     const html = disputeResolvedTemplate(data);
-    await this.sendEmail(emails, `Dispute Resolved: ${data.agreementTitle}`, html);
+    await this.sendEmail(emails, `Dispute Resolved: ${data.agreementTitle}`, html, {
+      eventType: 'dispute_resolved',
+      agreementId: data.agreementId,
+    });
   }
 
   /**
@@ -252,10 +486,24 @@ export class NotificationsService implements OnModuleInit {
    */
   async notifyAgreementCompleted(data: AgreementCompletedData): Promise<void> {
     const emails = await this.getParticipantEmails(data.agreementId);
-    if (emails.length === 0) return;
+    if (emails.length === 0) {
+      // Recorded, not just dropped: "nobody has an email on file" is the
+      // most common reason a notification never arrives, and it used to
+      // leave no trace at all.
+      await this.recordNotification({
+        eventType: 'agreement_completed',
+        agreementId: data.agreementId,
+        status: 'skipped',
+        errorMessage: 'No participant had an email address on their profile',
+      });
+      return;
+    }
 
     const html = agreementCompletedTemplate(data);
-    await this.sendEmail(emails, `Agreement Completed: ${data.title}`, html);
+    await this.sendEmail(emails, `Agreement Completed: ${data.title}`, html, {
+      eventType: 'agreement_completed',
+      agreementId: data.agreementId,
+    });
   }
 
   /**
@@ -268,8 +516,16 @@ export class NotificationsService implements OnModuleInit {
       if (email) emails.push(email);
     }
 
-    if (emails.length === 0) return;
-    await this.sendEmail(emails, subject, html);
+    if (emails.length === 0) {
+      await this.recordNotification({
+        eventType: 'custom',
+        status: 'skipped',
+        subject,
+        errorMessage: 'None of the given wallets had an email address',
+      });
+      return;
+    }
+    await this.sendEmail(emails, subject, html, { eventType: 'custom' });
   }
 
   /**
