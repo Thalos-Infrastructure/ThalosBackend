@@ -11,6 +11,8 @@ export const AGREEMENT_EVENTS = {
   MILESTONE_RELEASED: 'milestone.released',
   DISPUTE_OPENED: 'dispute.opened',
   DISPUTE_RESOLVED: 'dispute.resolved',
+  DISPUTE_PROPOSAL: 'dispute.proposal',
+  DISPUTE_PROPOSAL_ACCEPTED: 'dispute.proposal_accepted',
 } as const;
 
 export type AgreementEvent = (typeof AGREEMENT_EVENTS)[keyof typeof AGREEMENT_EVENTS];

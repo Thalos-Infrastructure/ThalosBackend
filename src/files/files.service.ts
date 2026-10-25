@@ -8,7 +8,7 @@ import {
   ServiceUnavailableException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { SupabaseService } from '../supabase/supabase.service';
 import { userCanAccessAgreement } from '../common/wallets/resolve-user-wallets';
 import {
@@ -42,6 +42,7 @@ export interface StoredFile {
   agreement_id: string | null;
   uploaded_by_wallet: string;
   created_at: string;
+  sha256_hex: string | null;
 }
 
 /** What a client needs to render an attachment, with no path or bucket leaked. */
@@ -50,6 +51,7 @@ export interface PublicFile {
   name: string;
   contentType: string;
   sizeBytes: number;
+  sha256: string | null;
 }
 
 export function toPublicFile(file: StoredFile): PublicFile {
@@ -58,6 +60,7 @@ export function toPublicFile(file: StoredFile): PublicFile {
     name: file.file_name,
     contentType: file.content_type,
     sizeBytes: file.size_bytes,
+    sha256: file.sha256_hex,
   };
 }
 
@@ -106,6 +109,7 @@ export class FilesService {
     const client = this.supabase.getClient();
     const id = randomUUID();
     const path = storagePathFor(agreementId, id);
+    const sha256_hex = createHash('sha256').update(file.buffer).digest('hex');
 
     const { error: uploadError } = await client.storage
       .from(STORAGE_BUCKET)
@@ -133,6 +137,7 @@ export class FilesService {
         agreement_id: agreementId,
         uploaded_by_user: userId,
         uploaded_by_wallet: uploaderWallet,
+        sha256_hex,
       })
       .select()
       .single();

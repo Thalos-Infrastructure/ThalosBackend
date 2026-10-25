@@ -8,6 +8,8 @@ import {
   AssignResolverDto,
   ResolveDisputeDto,
   CancelDisputeDto,
+  ProposeSettlementDto,
+  RespondProposalDto,
 } from './dto/disputes.dto';
 
 @ApiTags('disputes')
@@ -46,6 +48,45 @@ export class DisputesController {
   @Get(':id')
   getById(@CurrentUser() user: AuthUserCtx, @Param('id') id: string) {
     return this.disputes.getDisputeById(user.userId, id);
+  }
+
+  @Post(':id/proposals')
+  @ApiOperation({
+    summary: 'Propose a split',
+    description:
+      'Records an off-chain offer (percentages must sum to 100). Does not sign Trustless Work.',
+  })
+  proposeSettlement(
+    @CurrentUser() user: AuthUserCtx,
+    @Param('id') id: string,
+    @Body() dto: ProposeSettlementDto,
+  ) {
+    return this.disputes.proposeSettlement(user.userId, id, dto);
+  }
+
+  @Post(':id/proposals/:proposalId/accept')
+  @ApiOperation({
+    summary: 'Accept a split offer',
+    description:
+      'The other party accepts. Funds still move only when wallets sign resolve_dispute.',
+  })
+  acceptProposal(
+    @CurrentUser() user: AuthUserCtx,
+    @Param('id') id: string,
+    @Param('proposalId') proposalId: string,
+    @Body() dto: RespondProposalDto,
+  ) {
+    return this.disputes.acceptProposal(user.userId, id, proposalId, dto);
+  }
+
+  @Post(':id/proposals/:proposalId/reject')
+  rejectProposal(
+    @CurrentUser() user: AuthUserCtx,
+    @Param('id') id: string,
+    @Param('proposalId') proposalId: string,
+    @Body() dto: RespondProposalDto,
+  ) {
+    return this.disputes.rejectProposal(user.userId, id, proposalId, dto);
   }
 
   @Patch(':id/assign-resolver')

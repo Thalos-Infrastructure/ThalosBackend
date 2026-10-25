@@ -15,6 +15,8 @@ import {
   AssignResolverDto,
   ResolveDisputeDto,
   CancelDisputeDto,
+  ProposeSettlementDto,
+  RespondProposalDto,
 } from './dto/disputes.dto';
 
 export type DisputeStatus = 'open' | 'under_review' | 'resolved' | 'cancelled';
@@ -40,6 +42,48 @@ export interface DisputeResolution {
   payee_percentage: number;
   resolution_notes: string;
   created_at: string;
+}
+
+export type ProposalStatus = 'pending' | 'accepted' | 'rejected' | 'superseded';
+
+export interface DisputeProposal {
+  id: string;
+  dispute_id: string;
+  proposed_by: string;
+  payer_percentage: number;
+  payee_percentage: number;
+  notes: string;
+  status: ProposalStatus;
+  responded_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function asText(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+/** Live `disputes` is the 004 schema (`opened_by_wallet`, `escrow_contract_id`). */
+function toPublicDispute(row: Record<string, unknown>): Dispute {
+  const evidence = row.evidence_urls;
+  const urls = Array.isArray(evidence)
+    ? evidence.filter((item): item is string => typeof item === 'string')
+    : typeof row.evidence_url === 'string' && row.evidence_url
+      ? [row.evidence_url]
+      : [];
+  const createdAt = asText(row.created_at);
+  return {
+    id: asText(row.id),
+    agreement_id: asText(row.agreement_id),
+    opened_by: asText(row.opened_by) || asText(row.opened_by_wallet),
+    reason: asText(row.reason),
+    evidence_urls: urls,
+    status: row.status as DisputeStatus,
+    resolver_wallet: asText(row.resolver_wallet) || null,
+    created_at: createdAt,
+    updated_at: asText(row.updated_at) || createdAt,
+    resolved_at: asText(row.resolved_at) || null,
+  };
 }
 
 @Injectable()
@@ -100,32 +144,45 @@ export class DisputesService {
     await this.assertCanAccessAgreement(userId, dto.agreement_id);
     await this.assertActorWallet(userId, dto.opened_by);
 
-    // Check if there's already an open dispute
     const { data: existingDispute } = await this.supabase
       .getClient()
       .from('disputes')
-      .select('id')
+      .select('*')
       .eq('agreement_id', dto.agreement_id)
       .in('status', ['open', 'under_review'])
       .maybeSingle();
 
     if (existingDispute) {
-      return {
-        dispute: null,
-        error: 'There is already an open dispute for this agreement',
-      };
+      return { dispute: toPublicDispute(existingDispute as Record<string, unknown>), error: null };
     }
+
+    const { data: agreementRow } = await this.supabase
+      .getClient()
+      .from('agreements')
+      .select('status, contract_id, escrow_contract_id')
+      .eq('id', dto.agreement_id)
+      .maybeSingle();
+    const agr = agreementRow as {
+      status?: string;
+      contract_id?: string | null;
+      escrow_contract_id?: string | null;
+    } | null;
+    const alreadyDisputed = agr?.status === 'disputed';
+    const escrowContractId = agr?.contract_id || agr?.escrow_contract_id || '';
+
+    // Live table (004): opened_by_wallet + escrow_contract_id, no opened_by / evidence_urls.
+    const insert: Record<string, unknown> = {
+      agreement_id: dto.agreement_id,
+      opened_by_wallet: dto.opened_by,
+      escrow_contract_id: escrowContractId,
+      reason: dto.reason,
+      status: 'open',
+    };
 
     const { data: dispute, error } = await this.supabase
       .getClient()
       .from('disputes')
-      .insert({
-        agreement_id: dto.agreement_id,
-        opened_by: dto.opened_by,
-        reason: dto.reason,
-        evidence_urls: dto.evidence_urls || [],
-        status: 'open',
-      })
+      .insert(insert)
       .select()
       .single();
 
@@ -133,40 +190,41 @@ export class DisputesService {
       return { dispute: null, error: error.message };
     }
 
-    // Route Agreement status change through the shared side-effect path
-    // (activity log + domain events) so dispute-driven updates match normal updates.
-    const statusResult = await this.agreements.applyStatusChange(
-      dto.agreement_id,
-      dto.opened_by,
-      'disputed',
-      {
-        enforceTransition: true,
-        activityDetails: { dispute_id: dispute.id, reason: dto.reason, source: 'dispute' },
-      },
-    );
-    if (!statusResult.success) {
-      throw new BadRequestException({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          details: [
-            {
-              field: 'status',
-              code: 'INVALID_TRANSITION',
-              message: statusResult.error || 'Invalid status transition',
-            },
-          ],
+    let fromStatus: string | null = agr?.status ?? null;
+    if (!alreadyDisputed) {
+      const statusResult = await this.agreements.applyStatusChange(
+        dto.agreement_id,
+        dto.opened_by,
+        'disputed',
+        {
+          enforceTransition: true,
+          activityDetails: { dispute_id: dispute.id, reason: dto.reason, source: 'dispute' },
         },
-      });
+      );
+      if (!statusResult.success) {
+        throw new BadRequestException({
+          success: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            details: [
+              {
+                field: 'status',
+                code: 'INVALID_TRANSITION',
+                message: statusResult.error || 'Invalid status transition',
+              },
+            ],
+          },
+        });
+      }
+      fromStatus = statusResult.fromStatus ?? fromStatus;
     }
 
-    // Dispute-specific activity entry (parity with existing audit vocabulary)
     await this.activity.logActivity(
       dto.agreement_id,
       dto.opened_by,
       'dispute_opened',
       { dispute_id: dispute.id, reason: dto.reason },
-      { previousState: statusResult.fromStatus ?? null, newState: 'disputed' },
+      { previousState: fromStatus, newState: 'disputed' },
     );
 
     this.eventEmitter.emit(AGREEMENT_EVENTS.DISPUTE_OPENED, {
@@ -176,7 +234,7 @@ export class DisputesService {
       reason: dto.reason,
     });
 
-    return { dispute: dispute as Dispute, error: null };
+    return { dispute: toPublicDispute(dispute as Record<string, unknown>), error: null };
   }
 
   async assignResolver(userId: string, disputeId: string, dto: AssignResolverDto) {
@@ -203,7 +261,6 @@ export class DisputesService {
       .update({
         resolver_wallet: dto.resolver_wallet,
         status: 'under_review',
-        updated_at: new Date().toISOString(),
       })
       .eq('id', disputeId);
 
@@ -276,7 +333,6 @@ export class DisputesService {
       .update({
         status: 'resolved',
         resolved_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
       })
       .eq('id', disputeId);
 
@@ -330,7 +386,7 @@ export class DisputesService {
     const { data: dispute, error: fetchError } = await this.supabase
       .getClient()
       .from('disputes')
-      .select('agreement_id, opened_by, status')
+      .select('agreement_id, opened_by_wallet, status')
       .eq('id', disputeId)
       .maybeSingle();
 
@@ -338,7 +394,10 @@ export class DisputesService {
       throw new NotFoundException('Dispute not found');
     }
 
-    if (dispute.opened_by !== dto.cancelled_by) {
+    const opener =
+      (dispute as { opened_by?: string; opened_by_wallet?: string }).opened_by ??
+      (dispute as { opened_by_wallet?: string }).opened_by_wallet;
+    if (opener !== dto.cancelled_by) {
       throw new ForbiddenException('Only the dispute opener can cancel it');
     }
 
@@ -351,7 +410,6 @@ export class DisputesService {
       .from('disputes')
       .update({
         status: 'cancelled',
-        updated_at: new Date().toISOString(),
       })
       .eq('id', disputeId);
 
@@ -418,7 +476,13 @@ export class DisputesService {
       return { disputes: [], error: error.message };
     }
 
-    return { disputes: data || [], error: null };
+    return {
+      disputes: ((data as Record<string, unknown>[]) || []).map((row) => ({
+        ...toPublicDispute(row),
+        agreement: row.agreement,
+      })),
+      error: null,
+    };
   }
 
   async getDisputesByResolver(userId: string, resolverWallet: string) {
@@ -445,7 +509,13 @@ export class DisputesService {
       return { disputes: [], error: error.message };
     }
 
-    return { disputes: data || [], error: null };
+    return {
+      disputes: ((data as Record<string, unknown>[]) || []).map((row) => ({
+        ...toPublicDispute(row),
+        agreement: row.agreement,
+      })),
+      error: null,
+    };
   }
 
   async getDisputeById(userId: string, disputeId: string) {
@@ -481,11 +551,173 @@ export class DisputesService {
       .eq('dispute_id', disputeId)
       .maybeSingle();
 
+    const { data: proposal } = await this.supabase
+      .getClient()
+      .from('dispute_proposals')
+      .select('*')
+      .eq('dispute_id', disputeId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
     return {
-      dispute,
+      dispute: {
+        ...toPublicDispute(dispute as Record<string, unknown>),
+        agreement: (dispute as { agreement?: unknown }).agreement,
+      },
       resolution: resolution as DisputeResolution | null,
+      proposal: (proposal as DisputeProposal | null) ?? null,
       error: null,
     };
+  }
+
+  async proposeSettlement(userId: string, disputeId: string, dto: ProposeSettlementDto) {
+    await this.assertActorWallet(userId, dto.proposed_by);
+    if (dto.payer_percentage + dto.payee_percentage !== 100) {
+      throw new BadRequestException('Percentages must sum to 100%');
+    }
+
+    const dispute = await this.requireOpenDispute(disputeId);
+    await this.assertCanAccessAgreement(userId, dispute.agreement_id);
+
+    await this.supabase
+      .getClient()
+      .from('dispute_proposals')
+      .update({
+        status: 'superseded',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('dispute_id', disputeId)
+      .eq('status', 'pending');
+
+    const { data: proposal, error } = await this.supabase
+      .getClient()
+      .from('dispute_proposals')
+      .insert({
+        dispute_id: disputeId,
+        proposed_by: dto.proposed_by,
+        payer_percentage: dto.payer_percentage,
+        payee_percentage: dto.payee_percentage,
+        notes: dto.notes ?? '',
+        status: 'pending',
+      })
+      .select()
+      .single();
+
+    if (error || !proposal) {
+      throw new BadRequestException(
+        `Failed to record the proposal: ${error?.message ?? 'unknown'}`,
+      );
+    }
+
+    this.eventEmitter.emit(AGREEMENT_EVENTS.DISPUTE_PROPOSAL, {
+      agreementId: dispute.agreement_id,
+      disputeId,
+      proposedBy: dto.proposed_by,
+      payerPercentage: dto.payer_percentage,
+      payeePercentage: dto.payee_percentage,
+    });
+
+    return { proposal: proposal as DisputeProposal, error: null };
+  }
+
+  async acceptProposal(
+    userId: string,
+    disputeId: string,
+    proposalId: string,
+    dto: RespondProposalDto,
+  ) {
+    const proposal = await this.respondToProposal(userId, disputeId, proposalId, dto, 'accepted');
+
+    this.eventEmitter.emit(AGREEMENT_EVENTS.DISPUTE_PROPOSAL_ACCEPTED, {
+      agreementId: proposal.agreementId,
+      disputeId,
+      proposalId,
+      acceptedBy: dto.actor_wallet,
+      payerPercentage: proposal.row.payer_percentage,
+      payeePercentage: proposal.row.payee_percentage,
+    });
+
+    return {
+      proposal: proposal.row,
+      next: 'settlement_pending' as const,
+      error: null,
+    };
+  }
+
+  async rejectProposal(
+    userId: string,
+    disputeId: string,
+    proposalId: string,
+    dto: RespondProposalDto,
+  ) {
+    const proposal = await this.respondToProposal(userId, disputeId, proposalId, dto, 'rejected');
+    return { proposal: proposal.row, error: null };
+  }
+
+  private async requireOpenDispute(disputeId: string): Promise<Dispute> {
+    const { data, error } = await this.supabase
+      .getClient()
+      .from('disputes')
+      .select('*')
+      .eq('id', disputeId)
+      .maybeSingle();
+
+    if (error || !data) throw new NotFoundException('Dispute not found');
+    const dispute = toPublicDispute(data as Record<string, unknown>);
+    if (dispute.status === 'resolved' || dispute.status === 'cancelled') {
+      throw new BadRequestException('This dispute is already closed');
+    }
+    return dispute;
+  }
+
+  private async respondToProposal(
+    userId: string,
+    disputeId: string,
+    proposalId: string,
+    dto: RespondProposalDto,
+    status: 'accepted' | 'rejected',
+  ): Promise<{ row: DisputeProposal; agreementId: string }> {
+    await this.assertActorWallet(userId, dto.actor_wallet);
+
+    const dispute = await this.requireOpenDispute(disputeId);
+    await this.assertCanAccessAgreement(userId, dispute.agreement_id);
+
+    const { data, error } = await this.supabase
+      .getClient()
+      .from('dispute_proposals')
+      .select('*')
+      .eq('id', proposalId)
+      .eq('dispute_id', disputeId)
+      .maybeSingle();
+
+    if (error || !data) throw new NotFoundException('Proposal not found');
+    const row = data as DisputeProposal;
+    if (row.status !== 'pending') {
+      throw new BadRequestException('This proposal is no longer pending');
+    }
+    if (row.proposed_by === dto.actor_wallet) {
+      throw new ForbiddenException('The other party has to respond to this proposal');
+    }
+
+    const { data: updated, error: updateError } = await this.supabase
+      .getClient()
+      .from('dispute_proposals')
+      .update({
+        status,
+        responded_by: dto.actor_wallet,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', proposalId)
+      .eq('status', 'pending')
+      .select()
+      .maybeSingle();
+
+    if (updateError || !updated) {
+      throw new BadRequestException('Could not update the proposal');
+    }
+
+    return { row: updated as DisputeProposal, agreementId: dispute.agreement_id };
   }
 
   async getDisputesByAgreement(userId: string, agreementId: string) {
@@ -502,6 +734,9 @@ export class DisputesService {
       return { disputes: [], error: error.message };
     }
 
-    return { disputes: (data as Dispute[]) || [], error: null };
+    return {
+      disputes: ((data as Record<string, unknown>[]) || []).map((row) => toPublicDispute(row)),
+      error: null,
+    };
   }
 }

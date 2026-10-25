@@ -620,8 +620,11 @@ describe('migrated backend flows (integration)', () => {
       })
       .expect(201)
       .expect(({ body }) => {
-        expect(body.dispute).toBeNull();
-        expect(body.error).toBe('There is already an open dispute for this agreement');
+        expect(body.error).toBeNull();
+        expect(body.dispute).toMatchObject({
+          agreement_id: AGREEMENT_ID,
+          status: 'open',
+        });
       });
   });
 

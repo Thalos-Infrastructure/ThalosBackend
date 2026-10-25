@@ -201,6 +201,7 @@ describe('FilesService — storing a file', () => {
       content_type: 'image/png',
       size_bytes: 1024,
     });
+    expect(inserted[0].sha256_hex).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it('says the bucket may be missing instead of blaming the upload', async () => {
