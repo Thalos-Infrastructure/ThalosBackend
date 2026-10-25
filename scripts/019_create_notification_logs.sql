@@ -42,3 +42,13 @@ COMMENT ON TABLE public.notification_logs IS
   'One row per notification Thalos attempted. Records the attempt, not the delivery.';
 COMMENT ON COLUMN public.notification_logs.status IS
   'sent = the provider accepted it; failed = it was rejected; skipped = never attempted (e.g. no recipient had an email)';
+
+-- The table may already exist from the frontend's own `009_notification_logs.sql`,
+-- which has no `subject`. `CREATE TABLE IF NOT EXISTS` above would then leave it
+-- as it found it, and every insert would fail with "Could not find the 'subject'
+-- column" — the same way a missing `sender_id` broke the chat. Add it on its own.
+ALTER TABLE public.notification_logs ADD COLUMN IF NOT EXISTS subject TEXT;
+
+-- Same reason: an older table may predate these.
+ALTER TABLE public.notification_logs ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'email';
+ALTER TABLE public.notification_logs ADD COLUMN IF NOT EXISTS error_message TEXT;
