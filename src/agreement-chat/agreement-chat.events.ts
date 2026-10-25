@@ -59,6 +59,24 @@ export class AgreementChatEvents {
     await this.record(AGREEMENT_EVENTS.DISPUTE_RESOLVED, data);
   }
 
+  @OnEvent(AGREEMENT_EVENTS.DISPUTE_PROPOSAL)
+  async onProposal(data: {
+    agreementId?: string;
+    payerPercentage?: number;
+    payeePercentage?: number;
+  }): Promise<void> {
+    await this.record(AGREEMENT_EVENTS.DISPUTE_PROPOSAL, data);
+  }
+
+  @OnEvent(AGREEMENT_EVENTS.DISPUTE_PROPOSAL_ACCEPTED)
+  async onProposalAccepted(data: {
+    agreementId?: string;
+    payerPercentage?: number;
+    payeePercentage?: number;
+  }): Promise<void> {
+    await this.record(AGREEMENT_EVENTS.DISPUTE_PROPOSAL_ACCEPTED, data);
+  }
+
   private async record(eventType: string, data: Record<string, unknown>): Promise<void> {
     const agreementId = typeof data.agreementId === 'string' ? data.agreementId : null;
     if (!agreementId) {

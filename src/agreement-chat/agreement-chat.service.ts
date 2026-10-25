@@ -35,6 +35,8 @@ const EVENT_COPY: Record<string, string> = {
   'milestone.released': 'Milestone released',
   'dispute.opened': 'Dispute opened',
   'dispute.resolved': 'Dispute resolved',
+  'dispute.proposal': 'Settlement proposed',
+  'dispute.proposal_accepted': 'Settlement accepted by both parties',
 };
 
 @Injectable()
