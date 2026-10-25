@@ -13,6 +13,7 @@ import { RootController } from './root.controller';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AgreementChatModule } from './agreement-chat/agreement-chat.module';
 import { FilesModule } from './files/files.module';
+import { RampsModule } from './ramps/ramps.module';
 import { DisputesModule } from './disputes/disputes.module';
 import { ProfilesModule } from './profiles/profiles.module';
 import { WalletsModule } from './wallets/wallets.module';
@@ -44,6 +45,7 @@ import { ApplicationsModule } from './applications/applications.module';
     NotificationsModule,
     AgreementChatModule,
     FilesModule,
+    RampsModule,
     DisputesModule,
     ProfilesModule,
     WalletsModule,
