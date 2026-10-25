@@ -80,7 +80,7 @@ function buildChat(options: { isParticipant?: boolean } = {}) {
   };
 
   const files = {
-    readableFiles: async () => [],
+    readableFiles: () => Promise.resolve([]),
   } as unknown as FilesService;
 
   const service = new AgreementChatService(
