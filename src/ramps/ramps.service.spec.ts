@@ -164,12 +164,14 @@ describe('RampsService — the browser never picks the destination', () => {
 });
 
 describe('RampsService — verification', () => {
+  /** SEP-24 shape, as `@lendara/widget` publishes it. */
   const completed = (overrides: Partial<LendaraTransaction> = {}): LendaraTransaction => ({
     status: 'completed',
-    destination: MY_WALLET,
+    kind: 'deposit',
+    to: MY_WALLET,
     stellar_transaction_id: 'abc123',
-    asset_code: 'USDC',
-    asset_issuer: ESCROW_ISSUER,
+    amount_out: '100',
+    amount_out_asset: `stellar:USDC:${ESCROW_ISSUER}`,
     ...overrides,
   });
 
@@ -190,7 +192,7 @@ describe('RampsService — verification', () => {
     // The destination is recomputed, so a session created for another wallet
     // — or someone else's transaction id — cannot pass as this user's.
     const { service } = buildService({
-      transaction: completed({ destination: OTHER_WALLET }),
+      transaction: completed({ to: OTHER_WALLET }),
     });
 
     await expect(verify(service)).resolves.toMatchObject({
@@ -218,11 +220,22 @@ describe('RampsService — verification', () => {
     }
   });
 
+  it('treats an asset it cannot parse as not usable for the escrow', async () => {
+    const { service } = buildService({
+      transaction: completed({ amount_out_asset: 'native' }),
+    });
+
+    await expect(verify(service)).resolves.toMatchObject({
+      verified: true,
+      usableForEscrow: false,
+    });
+  });
+
   it('separates "the money arrived" from "the money can fund the escrow"', async () => {
     // Lendara's sandbox USDC has its own issuer. Same code, different asset:
     // it reaches the wallet but the escrow will not take it.
     const { service } = buildService({
-      transaction: completed({ asset_issuer: LENDARA_ISSUER }),
+      transaction: completed({ amount_out_asset: `stellar:USDC:${LENDARA_ISSUER}` }),
     });
 
     await expect(verify(service)).resolves.toMatchObject({

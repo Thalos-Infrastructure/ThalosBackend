@@ -36,22 +36,42 @@ export interface LendaraSession {
 }
 
 /**
- * A transaction as Lendara reports it.
+ * A transaction as Lendara reports it — the SEP-24 schema, confirmed against
+ * the published types of `@lendara/widget`.
  *
- * The exact field names are **not** confirmed against a live sandbox run yet,
- * so every one is optional and the caller treats anything it cannot read as
- * "not verified" rather than assuming success.
+ * Everything is optional anyway: the REST response is not guaranteed to match
+ * the widget's postMessage payload field for field, and the verifier treats
+ * anything it cannot read as "not verified" rather than assuming success.
  */
 export interface LendaraTransaction {
   id?: string;
+  kind?: string;
   status?: string;
   stellar_transaction_id?: string;
-  /** Destination Stellar account, however Lendara names it. */
-  account?: string;
+  /** Destination Stellar account (SEP-24 names it `to`). */
+  to?: string;
+  /** What was delivered, as `stellar:<CODE>:<ISSUER>` per SEP-38. */
+  amount_out_asset?: string;
+  amount_out?: string;
+  amount_in?: string;
+  amount_in_asset?: string;
+  completed_at?: string;
+  /** Older/alternative spellings, kept as fallbacks. */
   destination?: string;
-  amount?: string | number;
-  asset_code?: string;
+  account?: string;
   asset_issuer?: string;
+}
+
+/**
+ * The issuer out of a SEP-38 asset identifier (`stellar:USDC:GABC…`).
+ *
+ * Returns null for the native asset or anything unparseable, which the caller
+ * treats as "not the escrow's asset" rather than guessing.
+ */
+export function issuerOf(asset: string | undefined): string | null {
+  if (!asset) return null;
+  const parts = asset.split(':');
+  return parts.length === 3 && parts[0] === 'stellar' ? parts[2] : null;
 }
 
 @Injectable()

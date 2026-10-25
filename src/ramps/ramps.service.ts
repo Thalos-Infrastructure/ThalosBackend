@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { resolveUserWallets, userCanAccessAgreement } from '../common/wallets/resolve-user-wallets';
-import { LendaraClient, type LendaraTransaction } from './lendara.client';
+import { LendaraClient, issuerOf, type LendaraTransaction } from './lendara.client';
 import { getTrustline } from '../internal-trustless/escrow-write.helper';
 
 /**
@@ -129,7 +129,8 @@ export class RampsService {
       return { verified: false, reason: `The deposit is ${tx.status ?? 'not finished'}` };
     }
 
-    const destination = tx.destination ?? tx.account;
+    // SEP-24 calls it `to`; the others are fallbacks for a differing REST shape.
+    const destination = tx.to ?? tx.destination ?? tx.account;
     if (!destination) {
       return { verified: false, reason: 'Lendara did not report a destination account' };
     }
@@ -165,7 +166,9 @@ export class RampsService {
    */
   private matchesEscrowAsset(tx: LendaraTransaction): boolean {
     const expected = getTrustline();
-    if (!tx.asset_issuer) return false;
-    return tx.asset_issuer.toUpperCase() === expected.address.toUpperCase();
+    // SEP-24 reports the delivered asset as `stellar:USDC:GABC…`.
+    const issuer = issuerOf(tx.amount_out_asset) ?? tx.asset_issuer;
+    if (!issuer) return false;
+    return issuer.toUpperCase() === expected.address.toUpperCase();
   }
 }
