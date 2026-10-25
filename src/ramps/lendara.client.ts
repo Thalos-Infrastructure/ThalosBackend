@@ -1,4 +1,5 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { isMainnet } from '../internal-trustless/escrow-write.helper';
 
 /**
  * The only place Thalos talks to Lendara.
@@ -12,6 +13,20 @@ import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common'
 
 const DEFAULT_BASE_URL = 'https://lendaraweb-production.up.railway.app';
 const REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * Sandbox key used when `LENDARA_API_KEY` is unset, so the demo runs without
+ * per-environment configuration.
+ *
+ * It is a test key: the fiat is simulated and the USDC has no value. It is
+ * still a credential, it is in a public repository, and git history cannot be
+ * rewritten — rotate it once the demo is over.
+ *
+ * Only ever used on testnet. On mainnet a missing key is an error, because
+ * falling back to a sandbox project there would point real users at simulated
+ * money.
+ */
+const SANDBOX_API_KEY = 'lnd_test_K3J365P7K55526TJUFRPLHZ5GF';
 
 /** What Lendara returns when a session is created. */
 export interface LendaraSession {
@@ -47,16 +62,27 @@ export class LendaraClient {
     return (process.env.LENDARA_API_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
   }
 
+  private warnedAboutFallback = false;
+
   private apiKey(): string {
-    const key = process.env.LENDARA_API_KEY;
-    if (!key) {
-      // A missing key is a deployment problem; say so rather than send an
-      // unauthenticated request and report whatever Lendara answers.
+    const key = process.env.LENDARA_API_KEY?.trim();
+    if (key) return key;
+
+    if (isMainnet()) {
+      // A missing key is a deployment problem; say so rather than quietly
+      // serve real users from a sandbox project.
       throw new ServiceUnavailableException(
         'LENDARA_API_KEY is not configured, so the on-ramp is unavailable.',
       );
     }
-    return key;
+
+    if (!this.warnedAboutFallback) {
+      this.warnedAboutFallback = true;
+      this.logger.warn(
+        'LENDARA_API_KEY is not set — using the built-in sandbox key. Set the variable before relying on this.',
+      );
+    }
+    return SANDBOX_API_KEY;
   }
 
   private async request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
