@@ -17,6 +17,11 @@ export class AgreementChatController {
     return this.chat.getMessages(user.userId, agreementId);
   }
 
+  @Post(':agreementId/messages/read')
+  async markRead(@CurrentUser() user: AuthUserCtx, @Param('agreementId') agreementId: string) {
+    return this.chat.markRead(user.userId, agreementId);
+  }
+
   @Post(':agreementId/messages')
   async sendMessage(
     @CurrentUser() user: AuthUserCtx,

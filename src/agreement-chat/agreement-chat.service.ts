@@ -17,6 +17,7 @@ export interface AgreementMessage {
   sender_wallet: string;
   message: string;
   created_at: string;
+  read_at?: string | null;
   kind: MessageKind;
   event_type: string | null;
   metadata: Record<string, unknown>;
@@ -38,6 +39,22 @@ const EVENT_COPY: Record<string, string> = {
   'dispute.proposal': 'Settlement proposed',
   'dispute.proposal_accepted': 'Settlement accepted by both parties',
 };
+
+function eventLine(eventType: string, metadata: Record<string, unknown>): string {
+  const base = EVENT_COPY[eventType] ?? eventType;
+  const payer = metadata.payerPercentage;
+  const payee = metadata.payeePercentage;
+  if (
+    typeof payer === 'number' &&
+    typeof payee === 'number' &&
+    (eventType === 'dispute.proposal' ||
+      eventType === 'dispute.proposal_accepted' ||
+      eventType === 'dispute.resolved')
+  ) {
+    return `${base} (${payer}% payer / ${payee}% payee)`;
+  }
+  return base;
+}
 
 @Injectable()
 export class AgreementChatService {
@@ -92,7 +109,58 @@ export class AgreementChatService {
       event_type: m.event_type ?? null,
       metadata: m.metadata ?? {},
     }));
-    return { messages: await this.withAttachments(messages), error: null };
+    const wallets = new Set(
+      (await resolveUserWallets(this.supabase.getClient(), userId)).map((w) => w.toLowerCase()),
+    );
+    const unread_count = messages.filter(
+      (m) =>
+        (m.kind ?? 'user') === 'user' &&
+        !m.read_at &&
+        !wallets.has((m.sender_wallet ?? '').toLowerCase()),
+    ).length;
+    return { messages: await this.withAttachments(messages), unread_count, error: null };
+  }
+
+  /**
+   * The other party's user messages become read only when this user actually
+   * has the thread open. Listing while the panel is closed must not stamp
+   * `read_at`, or there is never an unread badge.
+   */
+  async markRead(userId: string, agreementId: string) {
+    await this.assertCanAccessAgreement(userId, agreementId);
+    const wallets = new Set(
+      (await resolveUserWallets(this.supabase.getClient(), userId)).map((w) => w.toLowerCase()),
+    );
+
+    const { data, error } = await this.supabase
+      .getClient()
+      .from('agreement_messages')
+      .select('id, sender_wallet, read_at, kind')
+      .eq('agreement_id', agreementId)
+      .is('read_at', null);
+
+    if (error) {
+      throw new BadRequestException(`Failed to mark messages read: ${error.message}`);
+    }
+
+    const ids = ((data as Array<Pick<AgreementMessage, 'id' | 'sender_wallet' | 'kind'>>) || [])
+      .filter(
+        (m) => (m.kind ?? 'user') === 'user' && !wallets.has((m.sender_wallet ?? '').toLowerCase()),
+      )
+      .map((m) => m.id);
+
+    if (ids.length === 0) return { marked: 0, error: null };
+
+    const { error: updateError } = await this.supabase
+      .getClient()
+      .from('agreement_messages')
+      .update({ read_at: new Date().toISOString() })
+      .in('id', ids);
+
+    if (updateError) {
+      throw new BadRequestException(`Failed to mark messages read: ${updateError.message}`);
+    }
+    return { marked: ids.length, error: null };
   }
 
   /**
@@ -224,7 +292,7 @@ export class AgreementChatService {
         agreement_id: agreementId,
         sender_id: null,
         sender_wallet: SYSTEM_SENDER_WALLET,
-        message: EVENT_COPY[eventType] ?? eventType,
+        message: eventLine(eventType, metadata),
         kind: 'event',
         event_type: eventType,
         metadata,
