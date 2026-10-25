@@ -26,7 +26,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
  * falling back to a sandbox project there would point real users at simulated
  * money.
  */
-const SANDBOX_API_KEY = 'lnd_test_K3J365P7K55526TJUFRPLHZ5GF';
+const SANDBOX_API_KEY = 'lnd_test_K3J365P7K55526TJUFRPLHZ5GF'; // gitleaks:allow
 
 /** What Lendara returns when a session is created. */
 export interface LendaraSession {
