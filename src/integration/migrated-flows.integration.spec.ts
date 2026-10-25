@@ -26,6 +26,7 @@ import { WebhooksService } from '../webhooks/webhooks.service';
 import { RetryQueueService } from '../retry-queue/retry-queue.service';
 import { AgreementChatController } from '../agreement-chat/agreement-chat.controller';
 import { AgreementChatService } from '../agreement-chat/agreement-chat.service';
+import { FilesService } from '../files/files.service';
 
 // WalletsService transitively imports @stellar/stellar-sdk, which ships ESM that
 // ts-jest does not transform. The migrated flows under test never exercise
@@ -379,6 +380,12 @@ describe('migrated backend flows (integration)', () => {
         DisputesService,
         WalletsService,
         AgreementChatService,
+        // AgreementChatService resolves attachments through FilesService. These
+        // flows never send one, so the stub only has to satisfy the injector.
+        {
+          provide: FilesService,
+          useValue: { readableFiles: jest.fn().mockResolvedValue([]) },
+        },
         {
           provide: AgreementSyncService,
           useValue: {
