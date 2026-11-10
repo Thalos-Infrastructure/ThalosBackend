@@ -95,6 +95,37 @@ export class ResolveDisputeDto {
   resolution_notes?: string;
 }
 
+export class ProposeSettlementDto {
+  @ApiProperty({ description: 'Wallet making the offer' })
+  @IsString()
+  @IsNotEmpty()
+  proposed_by: string;
+
+  @ApiProperty({ example: 60, minimum: 0, maximum: 100 })
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  payer_percentage: number;
+
+  @ApiProperty({ example: 40, minimum: 0, maximum: 100 })
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  payee_percentage: number;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  notes?: string;
+}
+
+export class RespondProposalDto {
+  @ApiProperty({ description: 'Wallet accepting or rejecting the offer' })
+  @IsString()
+  @IsNotEmpty()
+  actor_wallet: string;
+}
+
 export class CancelDisputeDto {
   @ApiProperty({
     description: 'Wallet address of the user cancelling the dispute (must match the opener)',

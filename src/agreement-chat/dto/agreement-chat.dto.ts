@@ -1,5 +1,16 @@
-import { ArrayMaxSize, IsArray, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 import { MAX_FILES_PER_MESSAGE } from '../../files/files.constants';
+
+export const MESSAGE_KINDS = ['user', 'system', 'event'] as const;
+export type MessageKind = (typeof MESSAGE_KINDS)[number];
 
 export class SendMessageDto {
   @IsUUID()
@@ -16,6 +27,7 @@ export class SendMessageDto {
    * present.
    */
   @IsString()
+  @MaxLength(4000)
   message: string;
 
   /** Ids returned by POST /v1/files, in the order they should be shown. */
