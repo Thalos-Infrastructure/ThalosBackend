@@ -323,14 +323,6 @@ export class WalletsService {
         throw new BadRequestException("auth_provider 'pollar' requires pollar_user_id");
       }
 
-      // An Accesly wallet is a passkey smart account and links as wallet_type
-      // 'accesly', which is where its c_address and its ownership proof are
-      // required. Recording the provider on a custodial row would claim an
-      // Accesly origin for a wallet that went through none of that.
-      if (authProvider === 'accesly') {
-        throw new BadRequestException("auth_provider 'accesly' requires wallet_type 'accesly'");
-      }
-
       // 'custodial' is Pollar's main path (wallet.type 'internal') and the one
       // branch that proves nothing — it auto-verifies. Harmless while the row
       // says nothing about who the user is; not harmless once it names a Pollar
@@ -340,49 +332,13 @@ export class WalletsService {
       if (authProvider === 'pollar' && pollarUserId) {
         await this.assertPollarOwnership(userId, dto.wallet_address, pollarUserId);
       }
-    } else if (dto.wallet_type === 'accesly') {
-      // Accesly (passkey smart account, #109) can't produce a classic SEP-0043
-      // wallet signature here, but ownership of the G-address was already
-      // proven server-side: the app JWT is minted only after the frontend
-      // wallet-challenge verify (raw Ed25519 over the challenge, signed with
-      // the same reconstructed owner key), which binds
-      // auth_users.wallet_public_key to the address. Accept that proof.
-      if (!dto.c_address) {
-        throw new BadRequestException('c_address is required for accesly wallets');
-      }
-
-      // The passkey login provisioned this wallet, so wallet_type already names
-      // the provider. Echoing 'accesly' back is fine, but any other provider —
-      // or a Pollar user id — describes an origin this wallet does not have.
-      // Refuse it rather than silently overwrite what the caller sent.
-      if (dto.auth_provider && dto.auth_provider !== 'accesly') {
-        throw new BadRequestException("auth_provider must be 'accesly' for an accesly wallet");
-      }
-      if (dto.pollar_user_id) {
-        throw new BadRequestException('pollar_user_id is not valid for an accesly wallet');
-      }
-      const { data: authUser } = await this.supabase
-        .getClient()
-        .from('auth_users')
-        .select('wallet_public_key')
-        .eq('id', userId)
-        .maybeSingle();
-      if (authUser?.wallet_public_key !== dto.wallet_address) {
-        throw new ForbiddenException('Accesly wallet does not match the authenticated user');
-      }
-      isVerified = true;
-      verifiedAt = new Date().toISOString();
-
-      // Guarded above: whatever the caller sent agrees with this or was refused.
-      authProvider = 'accesly';
-      pollarUserId = null;
     } else if (dto.auth_provider === 'pollar') {
       // A wallet the user brought, but authenticated through Pollar (#108).
       // It cannot produce a SEP-0043 signature here — the browser never held
       // the key, Pollar drove the wallet — but ownership was already proven:
       // Pollar runs SEP-10 against the wallet, and the app JWT is minted only
       // after that, writing the address onto auth_users.wallet_public_key.
-      // Same shape of proof the accesly branch accepts, so the same treatment.
+      // Same shape of proof: Pollar ran SEP-10; the app JWT binds the address.
       if (!dto.pollar_user_id) {
         throw new BadRequestException("auth_provider 'pollar' requires pollar_user_id");
       }
@@ -441,9 +397,8 @@ export class WalletsService {
       verified_at: verifiedAt,
     };
 
-    // Accesly (#109) / Pollar (FE #108) identity: login method, Pollar user id
-    // and Smart Account C-address. wallet_address keeps the derived G-address,
-    // which is what Trustless Work role matching (by-signer / by-role) keys on.
+    // Pollar (FE #108) identity: login method and Pollar user id.
+    // wallet_address keeps the G-address Trustless Work role matching keys on.
     // authProvider and pollarUserId were resolved per wallet_type above.
     const identityRow = {
       ...baseRow,

@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  InternalServerErrorException,
-} from '@nestjs/common';
+import { InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ApiClient } from '../common/api/api-client';
@@ -11,7 +7,6 @@ import { LinkWalletDto } from './dto/wallets.dto';
 
 const USER_ID = 'user-1';
 const G_ADDRESS = 'GCIQLYVY7QA7NASMJDNH27UQANK6Q5E2IT6QZLXCKDIYGC3YAB7P5SC4';
-const C_ADDRESS = 'CCV4UYUFZBD5CZDXZTZU47VFLWPKWRJLEWDICJAUNRZLETX63GJ4UAHW';
 const POLLAR_USER_ID = 'cms7zi5yd00930ilc8vx3nf4u';
 
 interface MockState {
@@ -93,15 +88,6 @@ function makeSupabase(state: MockState): SupabaseService {
 function makeService(state: MockState): WalletsService {
   const config = { get: () => 'testnet' } as unknown as ConfigService;
   return new WalletsService(makeSupabase(state), config, {} as ApiClient);
-}
-
-function acceslyDto(overrides: Partial<LinkWalletDto> = {}): LinkWalletDto {
-  return {
-    wallet_address: G_ADDRESS,
-    wallet_type: 'accesly',
-    c_address: C_ADDRESS,
-    ...overrides,
-  };
 }
 
 function pollarExternalDto(overrides: Partial<LinkWalletDto> = {}): LinkWalletDto {
@@ -207,21 +193,6 @@ describe('WalletsService.linkWallet — a Pollar identity is checked, not believ
     expect(state.inserts).toHaveLength(0);
   });
 
-  it('refuses an Accesly provider on a custodial wallet', async () => {
-    // An Accesly wallet links as wallet_type 'accesly', where c_address and the
-    // address check are required; claiming the provider on a custodial row skips
-    // both and asserts an origin the wallet does not have.
-    const state: MockState = { authUserWallet: G_ADDRESS, inserts: [], updates: [] };
-    const service = makeService(state);
-
-    await expect(
-      service.linkWallet(
-        USER_ID,
-        pollarCustodialDto({ auth_provider: 'accesly', pollar_user_id: undefined }),
-      ),
-    ).rejects.toThrow(/requires wallet_type 'accesly'/);
-    expect(state.inserts).toHaveLength(0);
-  });
 });
 
 describe('WalletsService.linkWallet — wallet authenticated through Pollar (#108)', () => {
@@ -280,86 +251,7 @@ describe('WalletsService.linkWallet — wallet authenticated through Pollar (#10
   });
 });
 
-describe('WalletsService.linkWallet — accesly identity (#109)', () => {
-  it('persists auth_provider + c_address and marks the wallet verified', async () => {
-    const state: MockState = { authUserWallet: G_ADDRESS, inserts: [], updates: [] };
-    const service = makeService(state);
-
-    const { wallet, error } = await service.linkWallet(USER_ID, acceslyDto());
-
-    expect(error).toBeNull();
-    expect(wallet).toMatchObject({
-      wallet_address: G_ADDRESS,
-      wallet_type: 'accesly',
-      auth_provider: 'accesly',
-      c_address: C_ADDRESS,
-      is_verified: true,
-    });
-  });
-
-  it('writes auth_users.wallet_provider so /api/auth/me echoes the login method', async () => {
-    const state: MockState = { authUserWallet: G_ADDRESS, inserts: [], updates: [] };
-    const service = makeService(state);
-
-    await service.linkWallet(USER_ID, acceslyDto());
-
-    expect(state.updates).toContainEqual({
-      table: 'auth_users',
-      row: { wallet_provider: 'accesly' },
-    });
-  });
-
-  it('rejects an accesly link without c_address', async () => {
-    const state: MockState = { authUserWallet: G_ADDRESS, inserts: [], updates: [] };
-    const service = makeService(state);
-
-    await expect(
-      service.linkWallet(USER_ID, acceslyDto({ c_address: undefined })),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('refuses an accesly wallet that claims a different provider', async () => {
-    const state: MockState = { authUserWallet: G_ADDRESS, inserts: [], updates: [] };
-    const service = makeService(state);
-
-    await expect(
-      service.linkWallet(USER_ID, acceslyDto({ auth_provider: 'pollar' })),
-    ).rejects.toThrow(/auth_provider must be 'accesly'/);
-    expect(state.inserts).toHaveLength(0);
-  });
-
-  it('refuses a pollar_user_id on an accesly wallet', async () => {
-    const state: MockState = { authUserWallet: G_ADDRESS, inserts: [], updates: [] };
-    const service = makeService(state);
-
-    await expect(
-      service.linkWallet(USER_ID, acceslyDto({ pollar_user_id: 'cms7zi5yd00930ilc8vx3nf4u' })),
-    ).rejects.toThrow(/pollar_user_id is not valid/);
-    expect(state.inserts).toHaveLength(0);
-  });
-
-  it('accepts an accesly wallet that echoes its own provider back', async () => {
-    const state: MockState = { authUserWallet: G_ADDRESS, inserts: [], updates: [] };
-    const service = makeService(state);
-
-    const { wallet, error } = await service.linkWallet(
-      USER_ID,
-      acceslyDto({ auth_provider: 'accesly' }),
-    );
-
-    expect(error).toBeNull();
-    expect(wallet).toMatchObject({ auth_provider: 'accesly' });
-  });
-
-  it('rejects an accesly link when the G-address does not match the JWT user wallet', async () => {
-    const state: MockState = { authUserWallet: 'GOTHERWALLET', inserts: [], updates: [] };
-    const service = makeService(state);
-
-    await expect(service.linkWallet(USER_ID, acceslyDto())).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
-  });
-
+describe('WalletsService.linkWallet — identity column fallbacks', () => {
   it('keeps auth_provider when only pollar_user_id is missing (008 applied, 013 pending)', async () => {
     // The state this branch deploys into. Dropping the whole identity here would
     // store a row indistinguishable from an external wallet while
@@ -387,21 +279,27 @@ describe('WalletsService.linkWallet — accesly identity (#109)', () => {
   it('falls back to the base row (no identity columns) on PGRST204 and still links', async () => {
     const state: MockState = {
       authUserWallet: G_ADDRESS,
+      authUserPollarId: POLLAR_USER_ID,
       missingColumns: ['auth_provider', 'pollar_user_id', 'c_address'],
       inserts: [],
       updates: [],
     };
     const service = makeService(state);
 
-    const { wallet, error } = await service.linkWallet(USER_ID, acceslyDto());
+    const { wallet, error } = await service.linkWallet(USER_ID, pollarCustodialDto());
 
     expect(error).toBeNull();
-    expect(state.inserts).toHaveLength(2);
-    expect(state.inserts[0]).toMatchObject({ auth_provider: 'accesly', c_address: C_ADDRESS });
-    expect(state.inserts[1]).not.toHaveProperty('auth_provider');
+    expect(state.inserts).toHaveLength(3);
+    expect(state.inserts[0]).toMatchObject({
+      auth_provider: 'pollar',
+      pollar_user_id: POLLAR_USER_ID,
+    });
+    expect(state.inserts[1]).toMatchObject({ auth_provider: 'pollar' });
     expect(state.inserts[1]).not.toHaveProperty('pollar_user_id');
-    expect(state.inserts[1]).not.toHaveProperty('c_address');
-    expect(wallet).toMatchObject({ wallet_address: G_ADDRESS, wallet_type: 'accesly' });
+    expect(state.inserts[2]).not.toHaveProperty('auth_provider');
+    expect(state.inserts[2]).not.toHaveProperty('pollar_user_id');
+    expect(state.inserts[2]).not.toHaveProperty('c_address');
+    expect(wallet).toMatchObject({ wallet_address: G_ADDRESS, wallet_type: 'custodial' });
   });
 });
 
