@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
  * Self-contained smoke test for scripts/008_add_accesly_identity.sql.
+ * Historical: after 019_drop_accesly_wallet_type.sql this insert is rejected.
  *
  * Run it right after applying 008 to confirm the Accesly identity can be
  * persisted on that database. It seeds a throwaway auth_users row, inserts an

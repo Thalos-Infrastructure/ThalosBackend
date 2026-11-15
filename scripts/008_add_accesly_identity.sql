@@ -1,4 +1,5 @@
 -- ThalosFrontend#109 — Accesly (passkey, non-custodial) identity persistence.
+-- Historical: 019_drop_accesly_wallet_type.sql removes wallet_type 'accesly'.
 -- Reuses the auth_provider column planned for the Pollar social login
 -- (ThalosFrontend#108); columns are guarded with IF NOT EXISTS so whichever
 -- migration runs first wins.
